@@ -3,8 +3,24 @@
   "version": "0.0.1",
   "description": "The terminal postman. Import curl, get structured requests, generate integration tests.",
   "type": "module",
+  "bin": {
+    "postui": "dist/postui.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/cli.ts --target=bun --outfile dist/postui.js",
+    "prepublishOnly": "bun run build && bun test"
+  },
   "engines": {
     "bun": ">=1.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quality-sh/postui.git"
   },
   "bin": {
     "postui": "./src/cli.ts"
