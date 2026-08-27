@@ -1,0 +1,6 @@
+{"schema_version":1,"scope_id":"postui","id":"dom_agent-surface","name":"Agent-facing CLI surface"}
+{"schema_version":1,"scope_id":"postui","id":"dom_curl-parsing","name":"Curl parsing"}
+{"schema_version":1,"scope_id":"postui","id":"dom_distribution","name":"Publishing and release"}
+{"schema_version":1,"scope_id":"postui","id":"dom_request-model","name":"Request model and serialization"}
+{"schema_version":1,"scope_id":"postui","id":"dom_test-generation","name":"Test generation"}
+{"schema_version":1,"scope_id":"postui","id":"dom_workspace","name":"Saved-request workspace"}
