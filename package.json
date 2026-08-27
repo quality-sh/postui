@@ -1,0 +1,23 @@
+{
+  "name": "postui",
+  "version": "0.0.1",
+  "description": "The terminal postman. Import curl, get structured requests, generate integration tests.",
+  "type": "module",
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "bin": {
+    "postui": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "effect": "^3.22.1"
+  }
+}
