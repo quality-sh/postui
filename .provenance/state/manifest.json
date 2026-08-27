@@ -4,6 +4,10 @@
     {
       "id": "postui",
       "path_prefix": "."
+    },
+    {
+      "id": "default",
+      "path_prefix": "."
     }
   ],
   "disposition_actor_ids": []

@@ -71,7 +71,7 @@ describe("parseCurl", () => {
     const { spec } = parseCurl(`curl -u admin:s3cret https://x.io`);
     const h = Object.fromEntries(spec.headers);
     expect(h["Authorization"]).toMatch(/^Basic /);
-    expect(atob(h["Authorization"]!.slice(6))).toBe("admin:s3cret");
+    expect(atob((h["Authorization"] ?? "").slice(6))).toBe("admin:s3cret");
   });
 
   test("known but ignored flags produce warnings", () => {

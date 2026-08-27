@@ -28,6 +28,127 @@ interface Parsed {
   warnings: ParseWarning[];
 }
 
+/** Mutable state threaded through the flag handlers while scanning argv. */
+interface ScanState {
+  words: string[];
+  idx: number;
+  method: string | null;
+  url: URL | null;
+  headers: Array<[string, string]>;
+  formEntries: FormDataEntry[];
+  dataChunks: Array<{ text: string; urlencode: boolean }>;
+  warnings: ParseWarning[];
+}
+
+type FlagHandler = (state: ScanState, flag: string) => void;
+
+/** Consume one flag value starting at idx+1, advancing idx past both. */
+function takeValue(state: ScanState, flag: string): string {
+  const v = state.words[state.idx + 1];
+  if (v === undefined || v.startsWith("-")) {
+    throw new CurlParseError({ message: `flag ${flag} requires a value` });
+  }
+  state.idx += 2;
+  return v;
+}
+
+function parseHeader(raw: string): [string, string] {
+  const sep = raw.indexOf(":");
+  if (sep === -1) {
+    throw new CurlParseError({ message: `invalid header: "${raw}"` });
+  }
+  return [raw.slice(0, sep).trim(), raw.slice(sep + 1).trim()];
+}
+
+function parseFormEntry(raw: string): FormDataEntry {
+  const eq = raw.indexOf("=");
+  if (eq === -1) {
+    throw new CurlParseError({ message: `invalid form field: "${raw}"` });
+  }
+  const name = raw.slice(0, eq);
+  const value = raw.slice(eq + 1);
+  return value.startsWith("@")
+    ? { kind: "file", name, path: value.slice(1) }
+    : { kind: "field", name, value };
+}
+
+const requestFlag: FlagHandler = (s, flag) => {
+  s.method = takeValue(s, flag).toUpperCase();
+};
+const headerFlag: FlagHandler = (s, flag) => {
+  s.headers.push(parseHeader(takeValue(s, flag)));
+};
+const dataFlag: FlagHandler = (s, flag) => {
+  s.dataChunks.push({ text: takeValue(s, flag), urlencode: false });
+};
+const dataUrlencodeFlag: FlagHandler = (s, flag) => {
+  s.dataChunks.push({ text: takeValue(s, flag), urlencode: true });
+};
+const formFlag: FlagHandler = (s, flag) => {
+  s.formEntries.push(parseFormEntry(takeValue(s, flag)));
+};
+const userFlag: FlagHandler = (s, flag) => {
+  s.headers.push(["Authorization", `Basic ${btoa(takeValue(s, flag))}`]);
+};
+const urlFlag: FlagHandler = (s, flag) => {
+  s.url = parseUrl(takeValue(s, flag));
+};
+
+const FLAG_HANDLERS: Record<string, FlagHandler> = {
+  "-X": requestFlag,
+  "--request": requestFlag,
+  "-H": headerFlag,
+  "--header": headerFlag,
+  "-d": dataFlag,
+  "--data": dataFlag,
+  "--data-raw": dataFlag,
+  "--data-binary": dataFlag,
+  "--data-urlencode": dataUrlencodeFlag,
+  "-F": formFlag,
+  "--form": formFlag,
+  "-u": userFlag,
+  "--user": userFlag,
+  "--url": urlFlag,
+};
+
+function handlePositional(state: ScanState, word: string): void {
+  if (state.url) {
+    state.warnings.push({
+      flag: word,
+      message: "extra positional argument ignored",
+    });
+  } else {
+    state.url = parseUrl(word);
+  }
+  state.idx++;
+}
+
+function scanWords(state: ScanState): void {
+  while (state.idx < state.words.length) {
+    const word = state.words[state.idx];
+    if (word === undefined) break;
+
+    const handler = FLAG_HANDLERS[word];
+    const ignored = IGNORED_FLAGS[word];
+    if (handler !== undefined) {
+      handler(state, word);
+    } else if (ignored !== undefined) {
+      state.warnings.push({ flag: word, message: ignored });
+      state.idx++;
+    } else if (UNKNOWN_TAKES_VALUE.has(word)) {
+      state.warnings.push({ flag: word, message: "unsupported flag ignored" });
+      state.idx += 2;
+    } else if (UNKNOWN_BARE.has(word)) {
+      state.warnings.push({ flag: word, message: "unsupported flag ignored" });
+      state.idx++;
+    } else if (word.startsWith("-")) {
+      throw new CurlParseError({ message: `unknown curl flag: ${word}` });
+    } else {
+      handlePositional(state, word);
+    }
+  }
+}
+
 /**
  * Parse a curl command into a RequestSpec.
  *
@@ -36,108 +157,26 @@ interface Parsed {
  *   - pre-split argv without the leading `curl` (as from process.argv)
  */
 export function parseCurl(input: string | string[]): Parsed {
-  const words =
-    typeof input === "string"
-      ? (() => {
-          try {
-            return splitShell(stripTrailingBackslashes(input.trim()));
-          } catch (e) {
-            if (e instanceof ShellSyntaxError) {
-              throw new CurlParseError({ message: e.message });
-            }
-            throw e;
-          }
-        })()
-      : input.slice();
+  const words = typeof input === "string" ? toWords(input) : input.slice();
 
-  // Drop a leading "curl" if present.
-  let idx = 0;
-  if (words[0] === "curl") idx = 1;
-
-  let method: string | null = null;
-  let url: URL | null = null;
-  const headers: Array<[string, string]> = [];
-  const formEntries: FormDataEntry[] = [];
-  const dataChunks: Array<{ text: string; urlencode: boolean }> = [];
-  const warnings: ParseWarning[] = [];
-
-  // Consume one flag value starting at idx+1, advancing idx past both.
-  const takeValue = (flag: string): string => {
-    const v = words[idx + 1];
-    if (v === undefined || v.startsWith("-")) {
-      throw new CurlParseError({ message: `flag ${flag} requires a value` });
-    }
-    idx += 2;
-    return v;
+  const state: ScanState = {
+    words,
+    // Drop a leading "curl" if present.
+    idx: words[0] === "curl" ? 1 : 0,
+    method: null,
+    url: null,
+    headers: [],
+    formEntries: [],
+    dataChunks: [],
+    warnings: [],
   };
+  scanWords(state);
 
-  while (idx < words.length) {
-    const word = words[idx]!;
-
-    if (word === "-X" || word === "--request") {
-      method = takeValue(word).toUpperCase();
-    } else if (word === "-H" || word === "--header") {
-      const raw = takeValue(word);
-      const sep = raw.indexOf(":");
-      if (sep === -1) {
-        throw new CurlParseError({ message: `invalid header: "${raw}"` });
-      }
-      headers.push([raw.slice(0, sep).trim(), raw.slice(sep + 1).trim()]);
-    } else if (
-      word === "-d" ||
-      word === "--data" ||
-      word === "--data-raw" ||
-      word === "--data-binary"
-    ) {
-      dataChunks.push({ text: takeValue(word), urlencode: false });
-    } else if (word === "--data-urlencode") {
-      dataChunks.push({ text: takeValue(word), urlencode: true });
-    } else if (word === "-F" || word === "--form") {
-      const raw = takeValue(word);
-      const eq = raw.indexOf("=");
-      if (eq === -1) {
-        throw new CurlParseError({ message: `invalid form field: "${raw}"` });
-      }
-      const name = raw.slice(0, eq);
-      const value = raw.slice(eq + 1);
-      formEntries.push(
-        value.startsWith("@")
-          ? { kind: "file", name, path: value.slice(1) }
-          : { kind: "field", name, value },
-      );
-    } else if (word === "-u" || word === "--user") {
-      headers.push(["Authorization", `Basic ${btoa(takeValue(word))}`]);
-    } else if (word === "--url") {
-      url = parseUrl(takeValue(word));
-    } else if (IGNORED_FLAGS[word]) {
-      warnings.push({ flag: word, message: IGNORED_FLAGS[word]! });
-      idx++;
-    } else if (UNKNOWN_TAKES_VALUE.has(word)) {
-      warnings.push({ flag: word, message: "unsupported flag ignored" });
-      idx += 2;
-    } else if (UNKNOWN_BARE.has(word)) {
-      warnings.push({ flag: word, message: "unsupported flag ignored" });
-      idx++;
-    } else if (word.startsWith("-")) {
-      throw new CurlParseError({ message: `unknown curl flag: ${word}` });
-    } else {
-      if (url) {
-        warnings.push({
-          flag: word,
-          message: "extra positional argument ignored",
-        });
-      } else {
-        url = parseUrl(word);
-      }
-      idx++;
-    }
-  }
-
-  if (!url) throw new CurlParseError({ message: "no URL found in curl command" });
+  if (!state.url) throw new CurlParseError({ message: "no URL found in curl command" });
 
   return {
-    spec: buildSpec(method, url, headers, dataChunks, formEntries),
-    warnings,
+    spec: buildSpec(state.method, state.url, state.headers, state.dataChunks, state.formEntries),
+    warnings: state.warnings,
   };
 }
 
@@ -216,6 +255,17 @@ export function guessContentType(text: string): string | null {
 /** Trim trailing backslash-newlines from pasted multiline commands. */
 function stripTrailingBackslashes(s: string): string {
   return s.replace(/\\\n/g, "\n");
+}
+
+function toWords(input: string): string[] {
+  try {
+    return splitShell(stripTrailingBackslashes(input.trim()));
+  } catch (e) {
+    if (e instanceof ShellSyntaxError) {
+      throw new CurlParseError({ message: e.message });
+    }
+    throw e;
+  }
 }
 
 // Unsupported flags we tolerate, split by whether they take a value.

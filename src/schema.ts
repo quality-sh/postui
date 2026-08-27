@@ -4,7 +4,7 @@ import { Schema } from "effect";
  * Serializable contract for a parsed request. Used to validate everything
  * `postui --json` emits before it leaves the process.
  */
-export const FormDataEntry = Schema.Union(
+const FormDataEntry = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("field"),
     name: Schema.String,
@@ -15,9 +15,9 @@ export const FormDataEntry = Schema.Union(
     name: Schema.String,
     path: Schema.String,
   }),
-);
+]);
 
-export const RequestBody = Schema.Union(
+const RequestBody = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("none") }),
   Schema.Struct({
     kind: Schema.Literal("raw"),
@@ -28,12 +28,12 @@ export const RequestBody = Schema.Union(
     kind: Schema.Literal("form"),
     entries: Schema.Array(FormDataEntry),
   }),
-);
+]);
 
 export const RequestSpecJson = Schema.Struct({
   method: Schema.String,
   url: Schema.String,
-  headers: Schema.Array(Schema.Tuple(Schema.String, Schema.String)),
+  headers: Schema.Array(Schema.Tuple([Schema.String, Schema.String])),
   body: RequestBody,
 });
 

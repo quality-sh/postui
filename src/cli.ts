@@ -20,19 +20,21 @@ Examples:
 export async function main(argv: string[]): Promise<number> {
   let jsonMode = false;
   const rest: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--json") jsonMode = true;
-    else rest.push(argv[i]!);
+  for (const arg of argv) {
+    if (arg === "--json") jsonMode = true;
+    else rest.push(arg);
   }
   if (rest.length === 0) usage();
+  const first = rest[0];
+  if (first === undefined) usage();
 
   // Invoked as `postui curl ...` in a shell, argv arrives pre-split. Rejoin
   // without re-tokenizing except when the caller passed one quoted string,
   // which the shell already collapsed into a single word containing spaces.
   const joined =
-    rest.length > 1 || !/\s/.test(rest[0]!)
+    rest.length > 1 || !/\s/.test(first)
       ? rest.join(" ")
-      : rest[0]!;
+      : first;
 
   try {
     const { spec, warnings } = parseCurl(joined);

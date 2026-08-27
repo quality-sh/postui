@@ -1,0 +1,27 @@
+{
+  "plugins": ["typescript", "unicorn", "import", "promise"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "ignorePatterns": ["dist"],
+  "rules": {
+    "complexity": ["error", { "max": 15 }],
+    "max-depth": ["error", { "max": 4 }],
+    "max-params": ["error", { "max": 5 }],
+    "max-lines": ["error", { "max": 300, "skipBlankLines": true, "skipComments": true }],
+    "no-nested-ternary": "error",
+    "no-await-in-loop": "error",
+    "eqeqeq": ["error", "always"],
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/consistent-type-imports": ["error", { "prefer": "type-imports" }],
+    "typescript/no-require-imports": "error",
+    "import/no-duplicates": "error",
+    "import/no-cycle": "error",
+    "promise/no-nesting": "error",
+    "unicorn/no-array-reduce": "error",
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/throw-new-error": "error"
+  }
+}

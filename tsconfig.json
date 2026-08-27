@@ -9,7 +9,21 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnostics": true,
+        "diagnosticsName": true,
+        "refactors": false,
+        "codeActions": false,
+        "completions": false,
+        "goto": false,
+        "inlayHints": false,
+        "renaming": false,
+        "signatureHelp": false
+      }
+    ]
   },
   "include": ["src", "test"]
 }

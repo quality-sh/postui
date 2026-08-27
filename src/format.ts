@@ -14,7 +14,7 @@ const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 
 /** Compact single-line summary. */
-export function summarize(spec: RequestSpec): string {
+function summarize(spec: RequestSpec): string {
   const color = METHOD_COLORS[spec.method] ?? "";
   return `${color}${BOLD}${spec.method}${RESET} ${spec.url}`;
 }
