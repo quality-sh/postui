@@ -123,6 +123,7 @@ function handlePositional(state: ScanState, word: string): void {
   state.idx++;
 }
 
+// @provenance rule: rule_flag_error_vs_warning
 function scanWords(state: ScanState): void {
   while (state.idx < state.words.length) {
     const word = state.words[state.idx];
@@ -180,6 +181,7 @@ export function parseCurl(input: string | string[]): Parsed {
   };
 }
 
+// @provenance rule: rule_method_inference
 function buildSpec(
   method: string | null,
   url: URL,
@@ -200,7 +202,9 @@ function buildSpec(
     }
     body = { kind: "form", entries: formEntries };
   } else if (dataChunks.length > 0) {
-    const text = dataChunks.map(c => c.text).join("&");
+    const text = dataChunks
+      .map(c => (c.urlencode ? encodeURIComponent(c.text) : c.text))
+      .join("&");
     body = {
       kind: "raw",
       contentType: contentTypeHeader?.[1] ?? guessContentType(text),
@@ -212,7 +216,8 @@ function buildSpec(
 
   // User-supplied headers win; fill in an inferred content-type otherwise.
   const finalHeaders = new Map(headers);
-  if (body.kind === "raw" && !finalHeaders.has("Content-Type") && body.contentType) {
+  const hasContentType = headers.some(([k]) => k.toLowerCase() === "content-type");
+  if (body.kind === "raw" && !hasContentType && body.contentType) {
     finalHeaders.set("Content-Type", body.contentType);
   }
 

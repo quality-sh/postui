@@ -17,6 +17,7 @@ Examples:
   process.exit(2);
 }
 
+// @provenance rule: rule_json_schema_gate
 export async function main(argv: string[]): Promise<number> {
   let jsonMode = false;
   const rest: string[] = [];

@@ -6,6 +6,7 @@ export class ShellSyntaxError extends Error {}
  *
  * "curl -X POST 'https://x.io/api?log=1\\n'" → ["curl", "-X", "POST", ...]
  */
+// @provenance rule: rule_shell_word_splitting
 export function splitShell(input: string): string[] {
   const words: string[] = [];
   let current = "";
