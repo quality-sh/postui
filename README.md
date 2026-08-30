@@ -18,7 +18,7 @@ bun postui/src/cli.ts \
 ## Plan
 
 1. `postui <curl>` → parse + pretty display ✅ (this)
-2. `postui save <curl>` → writes `requests/<name>.ts` into the workspace
+2. `postui save <curl>` → writes `requests/<name>.ts` into the workspace ✅
 3. `postui gen` → emits tests for vitest / bun:test / node:test
 4. `postui run [--json]` → executes your framework's runner; agent-friendly output
 5. OpenTUI interactive browser over the workspace
