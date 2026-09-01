@@ -1,8 +1,5 @@
 // @provenance rule: rule_agent_one_shot
-// @provenance rule: rule_agent_exit_status
-// @provenance rule: rule_agent_named_errors
-// @provenance rule: rule_env_resolve_at_send
-// @provenance rule: rule_env_missing_fails_fast
+
 // @provenance rule: rule_single_source_shared_input
 //
 // One command, no user input: sendRequest reads nothing from stdin and
@@ -231,10 +228,8 @@ async function buildBody(
   return { body: form, isForm: true };
 }
 
-// @provenance rule: rule_agent_exit_status
 /**
  * Map a fetch failure onto the two-tier contract. A failure that carries a
- * pre-connect cause (DNS, refusal, unreachable host, TLS handshake) means
  * postui could not make the send at all (misfire, exit 2). Everything else —
  * including unknown error shapes, which by definition happened after the
  * request was in flight — is a transport failure (exit 1); retrying may
@@ -329,7 +324,6 @@ export function renderDigest(outcome: SendOutcome, secrets: string[]): string {
   return scrubSecrets(lines.join("\n"), secrets);
 }
 
-// @provenance rule: rule_json_schema_gate
 /**
  * JSON digest: the same bounded, redacted view, encoded through the Effect
  * Schema contract before serialization, scrubbed after. The result is the

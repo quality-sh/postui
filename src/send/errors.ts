@@ -1,5 +1,4 @@
 // @provenance rule: rule_agent_named_errors
-// @provenance rule: rule_typed_failures
 //
 // Every send failure is one of these Data.TaggedError values. The CLI prints
 // only the tag and the (already-redacted) message — no stacks, no extras —

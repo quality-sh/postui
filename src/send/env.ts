@@ -1,7 +1,6 @@
 // @provenance rule: rule_env_resolve_at_send
 // @provenance rule: rule_env_missing_fails_fast
 // @provenance rule: rule_env_names_only_in_files
-// @provenance rule: rule_env_only_credentials
 //
 // Saved files hold credential NAMES only; values are read from the
 // environment once, here, when the send starts — never from arguments
