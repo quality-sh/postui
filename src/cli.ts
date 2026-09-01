@@ -2,6 +2,9 @@
 import { Data, Schema } from "effect";
 import { parseCurl, CurlParseError } from "./curl/parse.ts";
 import { display } from "./format.ts";
+import { generateTests, GenCollisionError, UnsupportedTargetError } from "./gen/gen.ts";
+import { FrameworkNotDetectedError } from "./gen/detect.ts";
+import { SavedModuleError } from "./gen/load.ts";
 import { RequestSpecJson } from "./schema.ts";
 import { saveRequest, SaveCollisionError } from "./save/save.ts";
 import { SaveNameError } from "./save/name.ts";
@@ -16,10 +19,14 @@ Usage:
   postui --json <curl ...>   Emit the structured request as JSON
   postui save [--name <n>] [--force] <curl ...>
                              Save the request as requests/<n>.ts
+  postui gen [--framework <f>]
+                             Generate tests/<n>.test.ts from saved requests
+                             (<f>: vitest | bun:test | node:test; default: detected)
 
 Examples:
   postui 'curl -X POST https://api.dev/users -H "Authorization: Bearer $T" -d '{"name":"ben"}''
   postui save 'curl https://api.dev/users'
+  postui gen
 `);
   throw new UsageError();
 }
@@ -55,6 +62,52 @@ function parseSaveArgs(args: string[]): { name: string | null; force: boolean; w
   return { name, force, words };
 }
 
+/** Consume gen flags; gen takes no positional arguments. */
+function parseGenArgs(args: string[]): { framework: string | null } {
+  let framework: string | null = null;
+  let i = 0;
+  while (i < args.length) {
+    const arg = args[i];
+    if (arg === "--framework") {
+      const value = args[i + 1];
+      if (value === undefined) usage();
+      framework = value;
+      i += 2;
+    } else {
+      usage();
+    }
+  }
+  return { framework };
+}
+
+async function runGen(args: string[]): Promise<number> {
+  const { framework } = parseGenArgs(args);
+  try {
+    const result = await generateTests({ framework });
+    if (result.files.length === 0) {
+      console.error(
+        "no saved requests found in requests/ — nothing to generate (save one with postui save)",
+      );
+      return 0;
+    }
+    for (const file of result.files) {
+      console.log(`generated ${file}`);
+    }
+    return 0;
+  } catch (e) {
+    if (
+      e instanceof FrameworkNotDetectedError ||
+      e instanceof UnsupportedTargetError ||
+      e instanceof SavedModuleError ||
+      e instanceof GenCollisionError
+    ) {
+      console.error(`error: ${e.message}`);
+      return 2;
+    }
+    throw e;
+  }
+}
+
 async function runSave(args: string[]): Promise<number> {
   const { name, force, words } = parseSaveArgs(args);
   try {
@@ -84,9 +137,11 @@ async function runSave(args: string[]): Promise<number> {
 }
 
 // @provenance rule: rule_json_schema_gate
+// @provenance rule: rule_typed_failures
 export async function main(argv: string[]): Promise<number> {
   try {
     if (argv[0] === "save") return await runSave(argv.slice(1));
+    if (argv[0] === "gen") return await runGen(argv.slice(1));
 
     let jsonMode = false;
     const rest: string[] = [];
