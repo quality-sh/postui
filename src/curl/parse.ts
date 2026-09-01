@@ -111,12 +111,33 @@ const FLAG_HANDLERS: Record<string, FlagHandler> = {
   "--url": urlFlag,
 };
 
+/**
+ * HTTP method names that may lead a command without `curl` or `-X`, as in
+ * `postui save POST https://x.io`. A bare all-caps method word before any
+ * URL names the method; it is never mistaken for the URL. Lowercase or
+ * mixed-case words stay URL candidates, and an explicit -X still wins when
+ * it comes later (flag semantics: last one set).
+ */
+const BARE_METHODS = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "DELETE",
+  "PATCH",
+  "HEAD",
+  "OPTIONS",
+  "TRACE",
+  "CONNECT",
+]);
+
 function handlePositional(state: ScanState, word: string): void {
   if (state.url) {
     state.warnings.push({
       flag: word,
       message: "extra positional argument ignored",
     });
+  } else if (BARE_METHODS.has(word)) {
+    state.method = word;
   } else {
     state.url = parseUrl(word);
   }
@@ -155,7 +176,12 @@ function scanWords(state: ScanState): void {
  *
  * Accepts either:
  *   - a full shell string: `curl -X POST https://x.io -H 'A: b' -d '{"k":1}'`
- *   - pre-split argv without the leading `curl` (as from process.argv)
+ *     (split by POSIX word-splitting rules)
+ *   - pre-split argv words (as from process.argv), where the caller's shell
+ *     already did the splitting — each word is one complete shell word and
+ *     boundaries are taken as-is
+ *
+ * A leading `curl` word is dropped in both forms.
  */
 export function parseCurl(input: string | string[]): Parsed {
   const words = typeof input === "string" ? toWords(input) : input.slice();

@@ -32,12 +32,14 @@ export interface SaveResult {
 
 /**
  * Save a curl command as one executable TypeScript module at
- * <dir>/<name>.ts. The file is created only after the curl input parses;
- * a failure anywhere leaves the requests folder untouched, and an existing
- * module is replaced only when force is set.
+ * <dir>/<name>.ts. The input is either a full shell string or pre-split
+ * argv words (as from process.argv, where the caller's shell already did
+ * the word splitting). The file is created only after the curl input
+ * parses; a failure anywhere leaves the requests folder untouched, and an
+ * existing module is replaced only when force is set.
  */
 export async function saveRequest(
-  input: string,
+  input: string | string[],
   opts: SaveOptions = {},
 ): Promise<SaveResult> {
   const target = opts.dir ?? "requests";
