@@ -5,6 +5,7 @@ import { display } from "./format.ts";
 import { generateTests, GenCollisionError, UnsupportedTargetError } from "./gen/gen.ts";
 import { FrameworkNotDetectedError } from "./gen/detect.ts";
 import { SavedModuleError, UnknownRequestError } from "./gen/load.ts";
+import { DocsOutError, generateDocs } from "./docs/docs.ts";
 import { RequestSpecJson } from "./schema.ts";
 import { saveRequest, SaveCollisionError } from "./save/save.ts";
 import { SaveNameError } from "./save/name.ts";
@@ -18,37 +19,12 @@ import {
 import { renderDigest, renderJson, sendRequest } from "./send/send.ts";
 import { scrubSecrets } from "./send/redact.ts";
 import { NoTestCommandError, runTestCommand } from "./run/exec.ts";
+import { USAGE_TEXT } from "./usage.ts";
 
 class UsageError extends Data.TaggedError("UsageError") {}
 
 function usage(): never {
-  console.error(`postui — the terminal postman
-
-Usage:
-  postui <curl ...>          Parse a curl command (paste it raw, quotes included)
-  postui --json <curl ...>   Emit the structured request as JSON
-  postui save [--name <n>] [--force] <curl ...>
-                             Save the request as requests/<n>.ts
-  postui gen [--framework <f>]
-                             Generate tests/<n>.test.ts from saved requests
-                             (<f>: vitest | bun:test | node:test; default: detected)
-  postui run                 Execute the project's own test command
-                             (package.json scripts.test); no built-in runner
-  postui send [--json] [--body-bytes <n>] <name>
-                             Send saved requests/<name>.ts once, non-interactively.
-                             Bounded redacted digest by default (256-byte body
-                             excerpt); --body-bytes <n> widens only that window.
-                             Exit: 0 sent, 1 API rejected the send, 2 postui
-                             could not make the send. Credential values come
-                             only from the environment, never from arguments.
-
-Examples:
-  postui 'curl -X POST https://api.dev/users -H "Authorization: Bearer $T" -d '{"name":"ben"}''
-  postui save 'curl https://api.dev/users'
-  postui gen
-  postui send users
-  postui send users --json --body-bytes 4096
-`);
+  console.error(USAGE_TEXT);
   throw new UsageError();
 }
 
@@ -122,6 +98,45 @@ async function runGen(args: string[]): Promise<number> {
       e instanceof SavedModuleError ||
       e instanceof GenCollisionError
     ) {
+      console.error(`error: ${e.message}`);
+      return 2;
+    }
+    throw e;
+  }
+}
+
+/** Consume docs flags; docs takes only --out and no positional arguments. */
+function parseDocsArgs(args: string[]): { out: string | null } {
+  let out: string | null = null;
+  let i = 0;
+  while (i < args.length) {
+    const arg = args[i];
+    if (arg === "--out") {
+      const value = args[i + 1];
+      if (value === undefined || value === "") usage();
+      out = value;
+      i += 2;
+    } else {
+      usage();
+    }
+  }
+  return { out };
+}
+
+async function runDocs(args: string[]): Promise<number> {
+  const { out } = parseDocsArgs(args);
+  try {
+    const result = await generateDocs({ out });
+    if (result.file === null) {
+      console.error(
+        "no saved requests found in requests/ — nothing to document (save one with postui save)",
+      );
+      return 0;
+    }
+    console.log(`generated ${result.file}`);
+    return 0;
+  } catch (e) {
+    if (e instanceof SavedModuleError || e instanceof DocsOutError) {
       console.error(`error: ${e.message}`);
       return 2;
     }
@@ -266,6 +281,7 @@ export async function main(argv: string[]): Promise<number> {
   try {
     if (argv[0] === "save") return await runSave(argv.slice(1));
     if (argv[0] === "gen") return await runGen(argv.slice(1));
+    if (argv[0] === "docs") return await runDocs(argv.slice(1));
     if (argv[0] === "send") return await runSend(argv.slice(1));
     if (argv[0] === "run") return await runRun(argv.slice(1));
 

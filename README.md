@@ -23,7 +23,9 @@ bun postui/src/cli.ts \
 4. `postui run` → executes your project's own test command ✅
 5. `postui send <name> [--json] [--body-bytes <n>]` → sends one saved request
    for agents: one shot, bounded redacted output, exit 0/1/2 retry signal ✅
-6. OpenTUI interactive browser over the workspace
+6. `postui docs [--out <dir>]` → regenerates markdown API docs (default
+   `docs/API.md`) from the saved requests alone ✅
+7. OpenTUI interactive browser over the workspace
 
 ## License
 
