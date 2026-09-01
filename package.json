@@ -21,7 +21,7 @@
     "knip": "knip",
     "audit": "bun audit --audit-level=high",
     "check": "bun run typecheck && bun run effect:check && bun run lint && bun run knip && bun run audit && bun test",
-    "build": "bun build src/cli.ts --target=bun --outfile dist/postui.js",
+    "build": "bun build src/cli.ts --target=bun --external @opentui/core --outfile dist/postui.js",
     "prepublishOnly": "bun run check && bun run build"
   },
   "engines": {
@@ -40,6 +40,7 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "@opentui/core": "0.5.9",
     "effect": "^4.0.0-rc.112"
   }
 }

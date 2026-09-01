@@ -25,7 +25,9 @@ bun postui/src/cli.ts \
    for agents: one shot, bounded redacted output, exit 0/1/2 retry signal ✅
 6. `postui docs [--out <dir>]` → regenerates markdown API docs (default
    `docs/API.md`) from the saved requests alone ✅
-7. OpenTUI interactive browser over the workspace
+7. `postui tui` → OpenTUI interactive browser over the workspace (shell:
+   header, collections pane, status bar; q quits; panes arrive ticket by
+   ticket) 🚧
 
 ## License
 

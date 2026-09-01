@@ -19,6 +19,7 @@ import {
 import { renderDigest, renderJson, sendRequest } from "./send/send.ts";
 import { scrubSecrets } from "./send/redact.ts";
 import { NoTestCommandError, runTestCommand } from "./run/exec.ts";
+import { runTui, tuiOptionsFromEnvironment } from "./tui/run.ts";
 import { USAGE_TEXT } from "./usage.ts";
 
 class UsageError extends Data.TaggedError("UsageError") {}
@@ -29,11 +30,10 @@ function usage(): never {
 }
 
 /**
- * Curl input for parseCurl: a lone argv word is a pasted shell command and
- * keeps POSIX splitting (quotes, escapes, line continuations); multiple
- * argv words were already split by the caller's shell, so they pass through
- * as-is — re-joining them would erase the original word boundaries and
- * mangle multi-word values like -H 'Authorization: Bearer tok'.
+ * Curl input for parseCurl: a lone argv word is a pasted shell command and keeps POSIX
+ * splitting (quotes, escapes, line continuations); multiple argv words were already
+ * split by the caller's shell, so they pass through as-is — re-joining them would erase
+ * the original word boundaries and mangle multi-word values like -H 'Authorization: B'.
  */
 function curlInput(words: string[]): string | string[] {
   const first = words[0];
@@ -159,8 +159,7 @@ async function runSave(args: string[]): Promise<number> {
     }
     for (const what of result.redacted) {
       console.error(
-        `warning: credential-like value in ${what} not saved` +
-          ` — reference an environment variable with $NAME instead`,
+        `warning: credential-like value in ${what} not saved — reference an environment variable with $NAME instead`,
       );
     }
     console.log(`saved ${result.path}`);
@@ -274,6 +273,33 @@ async function runRun(args: string[]): Promise<number> {
     throw e;
   }
 }
+/** Default path: treat the arguments as a pasted curl command. */
+async function runCurl(args: string[], jsonMode: boolean): Promise<number> {
+  try {
+    const { spec, warnings } = parseCurl(curlInput(args));
+    for (const w of warnings) {
+      console.error(`warning: ${w.flag} ignored (${w.message})`);
+    }
+    if (jsonMode) {
+      const payload = Schema.encodeSync(RequestSpecJson)({
+        method: spec.method,
+        url: spec.url.href,
+        headers: spec.headers,
+        body: spec.body,
+      });
+      console.log(JSON.stringify(payload, null, 2));
+    } else {
+      console.log(display(spec));
+    }
+    return 0;
+  } catch (e) {
+    if (e instanceof CurlParseError) {
+      console.error(`error: ${e.message}`);
+      return 1;
+    }
+    throw e;
+  }
+}
 
 // @provenance rule: rule_json_schema_gate
 // @provenance rule: rule_typed_failures
@@ -284,6 +310,10 @@ export async function main(argv: string[]): Promise<number> {
     if (argv[0] === "docs") return await runDocs(argv.slice(1));
     if (argv[0] === "send") return await runSend(argv.slice(1));
     if (argv[0] === "run") return await runRun(argv.slice(1));
+    if (argv[0] === "tui") {
+      if (argv.length > 1) usage();
+      return await runTui(tuiOptionsFromEnvironment(process.cwd()));
+    }
 
     let jsonMode = false;
     const rest: string[] = [];
@@ -292,31 +322,7 @@ export async function main(argv: string[]): Promise<number> {
       else rest.push(arg);
     }
     if (rest.length === 0) usage();
-
-    try {
-      const { spec, warnings } = parseCurl(curlInput(rest));
-      for (const w of warnings) {
-        console.error(`warning: ${w.flag} ignored (${w.message})`);
-      }
-      if (jsonMode) {
-        const payload = Schema.encodeSync(RequestSpecJson)({
-          method: spec.method,
-          url: spec.url.href,
-          headers: spec.headers,
-          body: spec.body,
-        });
-        console.log(JSON.stringify(payload, null, 2));
-      } else {
-        console.log(display(spec));
-      }
-      return 0;
-    } catch (e) {
-      if (e instanceof CurlParseError) {
-        console.error(`error: ${e.message}`);
-        return 1;
-      }
-      throw e;
-    }
+    return await runCurl(rest, jsonMode);
   } catch (e) {
     if (e instanceof UsageError) return 2;
     throw e;
