@@ -9,8 +9,43 @@ const CREDENTIAL_HEADERS = new Set(["authorization", "proxy-authorization"]);
 /** Matches `$NAME` and `${NAME}` environment references in a value. */
 const ENV_REF = /\$([A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})/;
 
+/** Global variant that finds every reference in a text. */
+const ENV_REF_GLOBAL = /\$([A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})/g;
+
 export function hasEnvRef(value: string): boolean {
   return ENV_REF.test(value);
+}
+
+/**
+ * Every environment name referenced in a text, in first-occurrence order,
+ * deduplicated. This is the single source of the `$NAME` reference syntax;
+ * `postui send` uses it to know which names must resolve before a send.
+ */
+export function extractEnvRefs(text: string): string[] {
+  const names: string[] = [];
+  for (const match of text.matchAll(ENV_REF_GLOBAL)) {
+    const raw = match[1];
+    if (raw === undefined) continue;
+    const name = raw.startsWith("{") && raw.endsWith("}") ? raw.slice(1, -1) : raw;
+    if (!names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+/**
+ * Replace every `$NAME` / `${NAME}` reference using resolve(name). A name
+ * resolve cannot answer should stay untouched — callers that need all names
+ * present must verify that first (send does, via fail-fast resolution).
+ */
+export function substituteEnvRefs(
+  text: string,
+  resolve: (name: string) => string | undefined,
+): string {
+  return text.replace(ENV_REF_GLOBAL, match => {
+    const raw = match.slice(1);
+    const name = raw.startsWith("{") && raw.endsWith("}") ? raw.slice(1, -1) : raw;
+    return resolve(name) ?? match;
+  });
 }
 
 /**

@@ -1,9 +1,14 @@
 import { Data } from "effect";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isValidModuleName } from "../save/name.ts";
 
 export class SavedModuleError extends Data.TaggedError("SavedModuleError")<
+  { message: string }
+> {}
+
+export class UnknownRequestError extends Data.TaggedError("UnknownRequestError")<
   { message: string }
 > {}
 
@@ -38,6 +43,28 @@ export interface LoadedRequest {
 export async function loadRequests(dir: string): Promise<LoadedRequest[]> {
   const files = await listTsFiles(dir);
   return Promise.all(files.map(file => loadOne(dir, file)));
+}
+
+/**
+ * Load exactly one saved request by module name. The name must be a safe
+ * plain filename (no traversal); a module that does not exist is an
+ * UnknownRequestError, one that does not load or export a well-formed
+ * request is a SavedModuleError. Send reads only its own module, so a
+ * broken sibling request never blocks an unrelated send.
+ */
+export async function loadRequestByName(dir: string, name: string): Promise<LoadedRequest> {
+  if (!isValidModuleName(name)) {
+    throw new UnknownRequestError({
+      message: `no saved request named "${name}" in ${dir}/`,
+    });
+  }
+  const path = join(dir, `${name}.ts`);
+  try {
+    await stat(path);
+  } catch {
+    throw new UnknownRequestError({ message: `no saved request named "${name}" in ${dir}/` });
+  }
+  return loadOne(dir, `${name}.ts`);
 }
 
 /**

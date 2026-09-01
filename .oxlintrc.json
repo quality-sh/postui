@@ -13,6 +13,7 @@
     "no-nested-ternary": "error",
     "no-await-in-loop": "error",
     "eqeqeq": ["error", "always"],
+    "eslint/no-underscore-dangle": ["error", { "allow": ["_tag"] }],
     "typescript/no-non-null-assertion": "error",
     "typescript/no-explicit-any": "error",
     "typescript/consistent-type-imports": ["error", { "prefer": "type-imports" }],

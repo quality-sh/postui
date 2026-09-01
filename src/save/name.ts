@@ -11,6 +11,11 @@ export class SaveNameError extends Data.TaggedError("SaveNameError")<
  */
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/** True when name is a safe plain module filename component (see NAME_PATTERN). */
+export function isValidModuleName(name: string): boolean {
+  return NAME_PATTERN.test(name);
+}
+
 /**
  * Pick the module name for a saved request: the --name flag wins, otherwise
  * the name is derived from the URL's last path segment (falling back to the
