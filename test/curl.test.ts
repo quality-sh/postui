@@ -101,6 +101,68 @@ describe("parseCurl", () => {
   });
 });
 
+describe("parseCurl with word-split argv", () => {
+  test("multi-word header values keep their boundaries", () => {
+    const { spec, warnings } = parseCurl([
+      "POST",
+      "https://x.io/api",
+      "-H",
+      "Authorization: Bearer sk-tok",
+      "-H",
+      "X-Trace: alpha beta gamma",
+    ]);
+    expect(spec.method).toBe("POST");
+    expect(spec.url.href).toBe("https://x.io/api");
+    expect(Object.fromEntries(spec.headers)["Authorization"]).toBe("Bearer sk-tok");
+    expect(Object.fromEntries(spec.headers)["X-Trace"]).toBe("alpha beta gamma");
+    expect(warnings).toEqual([]);
+  });
+
+  test("a bare leading method word names the method, not the URL", () => {
+    const fromArgv = parseCurl(["POST", "https://x.io/api"]);
+    expect(fromArgv.spec.method).toBe("POST");
+    expect(fromArgv.spec.url.href).toBe("https://x.io/api");
+    expect(fromArgv.warnings).toEqual([]);
+    // The string form of the same command behaves identically.
+    const fromString = parseCurl("POST https://x.io/api");
+    expect(fromString.spec.method).toBe("POST");
+    expect(fromString.spec.url.href).toBe("https://x.io/api");
+  });
+
+  test("a bare method word after the URL is still an ignored extra", () => {
+    const { spec, warnings } = parseCurl(["https://x.io", "POST"]);
+    expect(spec.method).toBe("GET");
+    expect(spec.url.href).toBe("https://x.io/");
+    expect(warnings.map(w => w.flag)).toEqual(["POST"]);
+  });
+
+  test("a method word with no URL is an error, not a bogus host", () => {
+    expect(() => parseCurl(["POST"])).toThrow(/URL/);
+  });
+
+  test("lowercase and mixed-case words stay URL candidates", () => {
+    expect(parseCurl(["post", "https://x.io"]).spec.url.hostname).toBe("post");
+    expect(parseCurl(["Post", "https://x.io"]).spec.url.hostname).toBe("post");
+  });
+
+  test("already-unquoted words pass through verbatim, quote boundaries intact", () => {
+    // As the shell delivers them: the user's quotes are gone, the value is
+    // one argv word containing double quotes, a backslash, and a tab.
+    const { spec, warnings } = parseCurl([
+      "https://x.io",
+      "-d",
+      '{"path":"C:\\tmp\\x",\t"k":"v"}',
+      "-H",
+      "X-Greeting: it's alive",
+    ]);
+    expect(warnings).toEqual([]);
+    if (spec.body.kind !== "raw") throw new Error("expected raw body");
+    expect(spec.body.text).toBe('{"path":"C:\\tmp\\x",\t"k":"v"}');
+    expect(spec.method).toBe("POST");
+    expect(Object.fromEntries(spec.headers)["X-Greeting"]).toBe("it's alive");
+  });
+});
+
 describe("guessContentType", () => {
   test("json object", () => expect(guessContentType('{"a":1}')).toBe("application/json"));
   test("json array", () => expect(guessContentType('[1,2]')).toBe("application/json"));

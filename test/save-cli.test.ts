@@ -99,6 +99,86 @@ describe("postui save (CLI)", () => {
     expect(content).not.toContain("sk-live-abc123");
   });
 
+  test("word-split argv: multi-word values keep their boundaries", async () => {
+    const code = await main([
+      "save",
+      "--name",
+      "users",
+      "curl",
+      "-X",
+      "POST",
+      "https://api.dev/users",
+      "-H",
+      "X-Note: hello world",
+    ]);
+    expect(code).toBe(0);
+    // No stray "extra positional" or mangled-value warnings.
+    expect(stderr()).toEqual([]);
+    const content = await readFile(join(dir, "requests", "users.ts"), "utf8");
+    expect(content).toContain('method: "POST"');
+    expect(content).toContain("hello world");
+  });
+
+  test("word-split argv: bare method word + real URL + credential stays whole", async () => {
+    const code = await main([
+      "save",
+      "POST",
+      "https://api.dev/users",
+      "-H",
+      "Authorization: Bearer sk-live-abc123",
+    ]);
+    expect(code).toBe(0);
+    // The name derives from the real URL, not from a method word misread
+    // as the host (http://post would have saved requests/post.ts).
+    expect(stdout()).toEqual(["saved requests/users.ts"]);
+    // Credential detection saw the whole header value, so the literal is
+    // redacted and the warning names the header.
+    expect(stderr().join("\n")).toContain("Authorization header");
+    const content = await readFile(join(dir, "requests", "users.ts"), "utf8");
+    expect(content).toContain('method: "POST"');
+    expect(content).toContain("https://api.dev/users");
+    expect(content).not.toContain("sk-live-abc123");
+  });
+
+  test("single-quoted single-arg form still parses inner quotes", async () => {
+    const code = await main([
+      "save",
+      "curl -X POST https://api.dev/users -H 'X-Note: hello world'",
+    ]);
+    expect(code).toBe(0);
+    expect(stderr()).toEqual([]);
+    const content = await readFile(join(dir, "requests", "users.ts"), "utf8");
+    expect(content).toContain('method: "POST"');
+    expect(content).toContain("hello world");
+  });
+
+  test("inspect path: word-split argv with a bare method word and env ref", async () => {
+    const code = await main([
+      "--json",
+      "POST",
+      "https://api.dev/users",
+      "-H",
+      "Authorization: Bearer $TOKEN",
+    ]);
+    expect(code).toBe(0);
+    const payload = JSON.parse(stdout().join("\n")) as {
+      method: string;
+      url: string;
+      headers: Array<[string, string]>;
+    };
+    expect(payload.method).toBe("POST");
+    expect(payload.url).toBe("https://api.dev/users");
+    // The $NAME reference passes through whole — never split mid-value.
+    expect(payload.headers).toEqual([["Authorization", "Bearer $TOKEN"]]);
+  });
+
+  test("a bare method word with no URL exits 1 instead of a bogus host", async () => {
+    const code = await main(["save", "POST"]);
+    expect(code).toBe(1);
+    expect(stderr().join("\n")).toContain("no URL found");
+    expect(existsSync(join(dir, "requests"))).toBe(false);
+  });
+
   test("no curl input exits 2 with usage on stderr", async () => {
     const code = await main(["save"]);
     expect(code).toBe(2);

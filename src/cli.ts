@@ -28,11 +28,17 @@ function usage(): never {
   throw new UsageError();
 }
 
-/** Rejoin argv into one curl string without re-tokenizing split words. */
-function joinCurl(words: string[]): string {
+/**
+ * Curl input for parseCurl: a lone argv word is a pasted shell command and
+ * keeps POSIX splitting (quotes, escapes, line continuations); multiple
+ * argv words were already split by the caller's shell, so they pass through
+ * as-is — re-joining them would erase the original word boundaries and
+ * mangle multi-word values like -H 'Authorization: Bearer tok'.
+ */
+function curlInput(words: string[]): string | string[] {
   const first = words[0];
   if (first === undefined) usage();
-  return words.length > 1 || !/\s/.test(first) ? words.join(" ") : first;
+  return words.length === 1 ? first : words;
 }
 
 /** Consume save flags; everything from the first non-flag word on is curl. */
@@ -147,7 +153,7 @@ async function runDocs(args: string[]): Promise<number> {
 async function runSave(args: string[]): Promise<number> {
   const { name, force, words } = parseSaveArgs(args);
   try {
-    const result = await saveRequest(joinCurl(words), { name, force });
+    const result = await saveRequest(curlInput(words), { name, force });
     for (const w of result.warnings) {
       console.error(`warning: ${w.flag} ignored (${w.message})`);
     }
@@ -294,7 +300,7 @@ export async function main(argv: string[]): Promise<number> {
     if (rest.length === 0) usage();
 
     try {
-      const { spec, warnings } = parseCurl(joinCurl(rest));
+      const { spec, warnings } = parseCurl(curlInput(rest));
       for (const w of warnings) {
         console.error(`warning: ${w.flag} ignored (${w.message})`);
       }
