@@ -1,8 +1,4 @@
 // @provenance rule: rule_agent_named_errors
-//
-// Every send failure is one of these Data.TaggedError values. The CLI prints
-// only the tag and the (already-redacted) message — no stacks, no extras —
-// so an agent can branch on the name.
 import { Data } from "effect";
 
 /** One or more $NAME references did not resolve. names never carries values. */

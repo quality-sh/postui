@@ -2,13 +2,6 @@
 // @provenance rule: rule_docs_read_only
 // @provenance rule: rule_docs_deleted_gone
 // @provenance rule: rule_docs_no_store
-//
-// The requests folder is the documentation's only endpoint source: every
-// top-level module loadable right now is documented, nothing from anywhere
-// else is, and nothing but the rendered document is written. Generation is
-// a pure re-read — it never modifies a saved request and keeps no copied
-// store, index, or database — so a hand edit shows up and a deleted request
-// is simply absent from the next run.
 import { Data } from "effect";
 import { mkdir } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";

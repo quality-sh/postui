@@ -1,14 +1,5 @@
 // @provenance rule: rule_agent_one_shot
-
 // @provenance rule: rule_single_source_shared_input
-//
-// One command, no user input: sendRequest reads nothing from stdin and
-// prompts for nothing. The requests folder is the only input; credential
-// VALUES are never read from anywhere but the environment (rule_env_only_
-// credentials is enforced by the CLI refusing every unknown option). All
-// referenced names resolve before any network I/O; one unset name fails the
-// whole send. Exit mapping (see src/cli.ts runSend): 0 sent, 1 rejected or
-// transport failure after the send started, 2 misfire.
 import { Schema } from "effect";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";

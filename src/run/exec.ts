@@ -1,12 +1,6 @@
 // @provenance rule: rule_run_user_command
 // @provenance rule: rule_run_exit_status
 // @provenance rule: rule_run_no_command_error
-//
-// `postui run` executes the test command the user's own project defines in
-// package.json scripts.test, verbatim, through sh. postui ships no built-in
-// test runner: a project with no test command is a named error, and the
-// child's exit status (or 128+signal for a signaled child) is postui's exit
-// status. Child stdio is inherited so live test output streams through.
 import { Data } from "effect";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";

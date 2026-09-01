@@ -1,12 +1,4 @@
 // @provenance rule: rule_docs_no_annotations
-//
-// Documentation is rendered from the saved request object alone: method,
-// url, headers, body — nothing else is read, so a request needs no added
-// documentation annotations to be documented, and nothing beyond what the
-// request states is described. Header values are shown only when the header
-// carries no credential marker (isCredentialHeader decides); every $NAME /
-// ${NAME} environment reference is shown as its NAME, never resolved — docs
-// performs no environment lookup of its own.
 import type { LoadedRequest } from "../gen/load.ts";
 import { substituteEnvRefs } from "../save/credentials.ts";
 import { REDACTED, isCredentialHeader } from "../send/redact.ts";

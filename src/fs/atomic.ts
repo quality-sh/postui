@@ -1,9 +1,4 @@
 // @provenance rule: rule_gen_emit_no_partial
-//
-// Owner ratification: atomic emission. Emitters write to a temp location and
-// rename into place, so the destination never observably holds a partial
-// file — stronger than delete-on-error and safe against parallel readers.
-// Covers all generation paths (tests, docs).
 import { randomUUID } from "node:crypto";
 import { rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";

@@ -1,10 +1,6 @@
 // @provenance rule: rule_env_resolve_at_send
 // @provenance rule: rule_env_missing_fails_fast
 // @provenance rule: rule_env_names_only_in_files
-//
-// Saved files hold credential NAMES only; values are read from the
-// environment once, here, when the send starts — never from arguments
-// (the CLI refuses every option that is not --json / --body-bytes).
 import { extractEnvRefs } from "../save/credentials.ts";
 import { MissingEnvError } from "./errors.ts";
 

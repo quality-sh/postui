@@ -193,8 +193,6 @@ function parseSendArgs(args: string[]): { name: string; json: boolean; bodyWindo
       i++;
     } else if (arg.startsWith("-")) {
       // @provenance rule: rule_env_only_credentials
-      // Every option outside the strict set is refused before anything
-      // loads, so a credential value can never enter through an argument.
       throw new UnknownSendFlagError({
         message:
           `unknown option "${arg}" — postui send takes only --json and ` +
@@ -213,10 +211,6 @@ function parseSendArgs(args: string[]): { name: string; json: boolean; bodyWindo
 
 // @provenance rule: rule_agent_streams_split
 // @provenance rule: rule_agent_exit_status
-// Send data (digest, or the sole JSON value in --json mode) goes to stdout;
-// the named error goes to stderr; nothing else is printed on either stream.
-// Exit: 0 sent, 1 rejected or transport failure after the send started,
-// 2 postui could not make the send.
 async function runSend(args: string[]): Promise<number> {
   try {
     const { name, json, bodyWindow } = parseSendArgs(args);

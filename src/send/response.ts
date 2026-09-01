@@ -1,15 +1,4 @@
 // @provenance rule: rule_agent_body_cap
-//
-// Owner decision: progressive disclosure, not a hard length cut. The default
-// view is a bounded digest; an explicit agent request (--body-bytes <n>)
-// widens only the body window. Every section below is individually bounded,
-// so the default digest as a whole stays finite.
-//
-// Documented bounds (the default digest stays under ~4 KiB):
-//   - body excerpt:  DEFAULT_BODY_WINDOW (256) bytes
-//   - header blocks: MAX_DISPLAY_HEADERS (32) lines per block, then a count
-//   - header values: MAX_HEADER_VALUE_CHARS (256) characters, then an ellipsis
-
 import { redactHeaders } from "./redact.ts";
 
 /** Default body-excerpt window in bytes. */
