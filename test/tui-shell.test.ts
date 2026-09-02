@@ -19,11 +19,15 @@ async function setupShell() {
   return { ...setup, shell };
 }
 
+/** Minimal structural type for a captured span line (OpenTUI renderer output). */
+type CapturedSpan = { text: string; fg: { equals(v: unknown): boolean } };
+type CapturedLine = { spans: CapturedSpan[] };
+
 /** Collapse a captured row's spans into plain text. */
 function rowText(setup: TestRendererSetup, row: number): string {
   return (setup
     .captureSpans()
-    .lines[row]?.spans.map((span) => span.text)
+    .lines[row]?.spans.map((span: CapturedSpan) => span.text)
     .join("")) ?? "";
 }
 
@@ -68,8 +72,8 @@ describe("postui tui shell", () => {
     const accent = RGBA.fromHex(THEME.color.accent);
     const wordmark = setup
       .captureSpans()
-      .lines.flatMap((line) => line.spans)
-      .find((span) => span.text.includes("P O S T U I"));
+      .lines.flatMap((line: CapturedLine) => line.spans)
+      .find((span: CapturedSpan) => span.text.includes("P O S T U I"));
     expect(wordmark?.fg.equals(accent)).toBe(true);
   });
 
@@ -78,15 +82,16 @@ describe("postui tui shell", () => {
     await setup.renderOnce();
     const accent = RGBA.fromHex(THEME.color.accent);
     const muted = RGBA.fromHex(THEME.color.border);
-    const spans = setup.captureSpans().lines.flatMap((line) => line.spans);
+    const spans = setup.captureSpans().lines.flatMap((line: CapturedLine) => line.spans);
     // Border glyphs of the focused collections pane are painted accent...
     const accentBorder = spans.filter(
-      (span) => span.fg.equals(accent) && /[─│┌┐└┘]/.test(span.text),
+      (span: CapturedSpan) => span.fg.equals(accent) && /[─│┌┐└┘]/.test(span.text),
     );
     expect(accentBorder.length).toBeGreaterThan(0);
     // ...while the header/status borders stay muted.
     const mutedBorder = spans.filter(
-      (span) => span.fg.equals(muted) && /[─│┌┐└┘]/.test(span.text),
+      (span: { fg: { equals: (v: unknown) => boolean }; text: string }) =>
+        span.fg.equals(muted) && /[─│┌┐└┘]/.test(span.text),
     );
     expect(mutedBorder.length).toBeGreaterThan(0);
     expect(setup.shell.focus.focused).toBe(COLLECTIONS_PANE_ID);

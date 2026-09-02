@@ -19,7 +19,7 @@ import {
 import { renderDigest, renderJson, sendRequest } from "./send/send.ts";
 import { scrubSecrets } from "./send/redact.ts";
 import { NoTestCommandError, runTestCommand } from "./run/exec.ts";
-import { runTui, tuiOptionsFromEnvironment } from "./tui/run.ts";
+
 import { USAGE_TEXT } from "./usage.ts";
 
 class UsageError extends Data.TaggedError("UsageError") {}
@@ -312,6 +312,8 @@ export async function main(argv: string[]): Promise<number> {
     if (argv[0] === "run") return await runRun(argv.slice(1));
     if (argv[0] === "tui") {
       if (argv.length > 1) usage();
+      // Lazy import: the core CLI must not require @opentui/core to run.
+      const { runTui, tuiOptionsFromEnvironment } = await import("./tui/run.ts");
       return await runTui(tuiOptionsFromEnvironment(process.cwd()));
     }
 
