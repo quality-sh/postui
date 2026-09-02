@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { createCliRenderer } from "@opentui/core";
 import { startShell } from "./shell.ts";
 import { THEME } from "./theme.ts";
@@ -6,6 +6,8 @@ import { THEME } from "./theme.ts";
 export interface TuiOptions {
   readonly workspaceName: string;
   readonly envBadge: string;
+  /** The workspace's requests folder, browsed by the collections pane. */
+  readonly requestsDir: string;
 }
 
 /**
@@ -44,5 +46,6 @@ export function tuiOptionsFromEnvironment(cwd: string): TuiOptions {
   return {
     workspaceName: basename(cwd) || "workspace",
     envBadge: process.env.POSTUI_ENV ?? "DEV",
+    requestsDir: join(cwd, "requests"),
   };
 }

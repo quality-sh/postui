@@ -1,24 +1,29 @@
 import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
 import type { CliRenderer, TextChunk } from "@opentui/core";
+import { COLLECTIONS_PANE_ID, startCollectionsPane } from "./collections.ts";
+import type { CollectionsPane } from "./collections.ts";
 import { FocusRegistry } from "./focus.ts";
 import { GLOBAL_KEYS, globalAction } from "./keymap.ts";
 import type { KeyHint, ParsedKeyLike } from "./keymap.ts";
 import { THEME } from "./theme.ts";
 
-/** The collections placeholder pane; the collections ticket fills it. */
-export const COLLECTIONS_PANE_ID = "collections";
+export { COLLECTIONS_PANE_ID };
 
 export interface ShellOptions {
   /** Name shown centered in the header (the workspace the CLI runs in). */
   readonly workspaceName: string;
   /** Environment badge shown at the header's right edge. */
   readonly envBadge: string;
+  /** The workspace's requests folder; the collections pane re-reads it on focus. */
+  readonly requestsDir: string;
 }
 
 /** A started shell attached to a renderer. */
 export interface Shell {
   /** App-level pane focus; the shell keeps its border state in sync. */
   readonly focus: FocusRegistry;
+  /** The collections pane (request tree, navigation, preview). */
+  readonly collections: CollectionsPane;
   /** Resolves once a quit key was pressed. */
   readonly onQuit: Promise<"quit">;
   /** Detach the shell's key listener (renderer.destroy() handles the rest). */
@@ -26,15 +31,16 @@ export interface Shell {
 }
 
 /**
- * Build the application shell on a renderer: header bar, collections
- * placeholder pane, status bar. Runs on the real renderer from
+ * Build the application shell on a renderer: header bar, collections pane
+ * (request tree with preview), status bar. Runs on the real renderer from
  * createCliRenderer() and on the headless createTestRenderer() alike.
  *
  * Pane focus is owned by the FocusRegistry: the shell paints the focused
  * pane's border in the accent color (the mockup's selected-bar treatment).
  * OpenTUI's native focusable/focusedBorderColor machinery stays unused so
- * there is exactly one source of focus truth; the collections ticket can
- * bridge registry focus to its input renderables if routing needs it.
+ * there is exactly one source of focus truth. Keys the focused pane owns
+ * (j/k, enter in collections) are offered to the pane first; everything
+ * else falls through to the global map.
  */
 export function startShell(renderer: CliRenderer, options: ShellOptions): Shell {
   const focus = new FocusRegistry();
@@ -54,16 +60,19 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     flexGrow: 1,
     backgroundColor: THEME.color.bg,
   });
-  const { pane } = buildCollectionsPane(renderer);
-  body.add(pane);
-  body.add(buildMainRegion(renderer));
+  const mainRegion = buildMainRegion(renderer);
+  const collections = startCollectionsPane(renderer, {
+    requestsDir: options.requestsDir,
+    mainRegion,
+  });
+  body.add(collections.pane);
+  body.add(mainRegion);
   root.add(body);
 
   root.add(buildStatusBar(renderer));
 
-  const panes: Record<string, BoxRenderable> = {};
   focus.register(COLLECTIONS_PANE_ID);
-  panes[COLLECTIONS_PANE_ID] = pane;
+  const panes: Record<string, BoxRenderable> = { [COLLECTIONS_PANE_ID]: collections.pane };
   const repaintFocus = (): void => applyFocus(focus, panes);
   repaintFocus();
 
@@ -73,20 +82,24 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   });
 
   const keyListener = (key: ParsedKeyLike): void => {
+    if (focus.focused === COLLECTIONS_PANE_ID && collections.handleKey(key)) return;
     const action = globalAction(key);
     if (action === "quit") requestQuit?.();
     else if (action === "focus-next") {
       focus.cycle();
       repaintFocus();
+      collections.syncFocus(focus.focused);
     } else if (action === "focus-previous") {
       focus.cycleBack();
       repaintFocus();
+      collections.syncFocus(focus.focused);
     }
   };
   renderer.keyInput.on("keypress", keyListener);
 
   return {
     focus,
+    collections,
     onQuit,
     dispose: () => {
       renderer.keyInput.off("keypress", keyListener);
@@ -158,44 +171,11 @@ function buildHeader(renderer: CliRenderer, options: ShellOptions): BoxRenderabl
   return header;
 }
 
-function buildCollectionsPane(renderer: CliRenderer): { pane: BoxRenderable } {
-  const pane = new BoxRenderable(renderer, {
-    width: 30,
-    height: "100%",
-    border: true,
-    borderColor: THEME.color.border,
-    title: "COLLECTIONS",
-    titleColor: THEME.color.bright,
-    backgroundColor: THEME.color.bg,
-  });
-  const empty = new BoxRenderable(renderer, {
-    flexDirection: "column",
-    justifyContent: "center",
-    alignItems: "center",
-    width: "100%",
-    height: "100%",
-    gap: 1,
-  });
-  empty.add(
-    new TextRenderable(renderer, { content: "no saved requests", fg: THEME.color.text }),
-  );
-  empty.add(
-    new TextRenderable(renderer, { content: "save one with", fg: THEME.color.dim }),
-  );
-  empty.add(
-    new TextRenderable(renderer, {
-      content: "postui save '<curl>'",
-      fg: THEME.color.dim,
-    }),
-  );
-  pane.add(empty);
-  return { pane };
-}
-
 function buildMainRegion(renderer: CliRenderer): BoxRenderable {
-  // Quiet container for the panes later tickets add (preview, composer,
-  // response). Intentionally borderless: an empty framed box would promise
-  // content that does not exist yet.
+  // Hosts the selected request's preview (rendered by the collections
+  // controller); later tickets add the composer and response panes.
+  // Borderless when empty: a framed box would promise content that the
+  // workspace does not have.
   return new BoxRenderable(renderer, {
     flexGrow: 1,
     backgroundColor: THEME.color.bg,
