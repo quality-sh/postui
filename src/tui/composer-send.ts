@@ -1,6 +1,3 @@
-// @provenance rule: rule_redact_credential_headers
-// @provenance rule: rule_redaction_no_off_switch
-// @provenance rule: rule_env_missing_fails_fast
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
