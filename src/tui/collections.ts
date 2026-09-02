@@ -6,12 +6,14 @@ import type { CollectionGroup } from "./collection-groups.ts";
 import {
   REQUEST_ROW_HEIGHT,
   headerRow,
+  renderCollectionsEmptyState,
   renderError,
-  renderEmptyState,
+  renderNoMatches,
   requestRow,
 } from "./collections-render.ts";
 import type { ParsedKeyLike } from "./keymap.ts";
-import { clearChildren } from "./render.ts";
+import { clearChildren, DECOR_SIZE, halftoneTail } from "./render.ts";
+import { rankRequests } from "./search.ts";
 import { THEME } from "./theme.ts";
 import { readWorkspace } from "./workspace.ts";
 
@@ -39,7 +41,7 @@ export interface CollectionsPaneOptions {
   readonly onReload?: (request: LoadedRequest) => void;
 }
 
-/** The collections pane controller the shell drives: keys, focus, opening. */
+/** The collections pane controller the shell drives: keys, focus, opening, search filter. */
 export interface CollectionsPane {
   readonly pane: BoxRenderable;
   /** Resolves once the initial workspace load has been rendered. */
@@ -50,6 +52,25 @@ export interface CollectionsPane {
   handleKey(key: ParsedKeyLike): boolean;
   /** Called by the shell after every focus change; refreshes on regaining focus. */
   syncFocus(focusedPane: string | null): void;
+  /**
+   * Search-filter mode (the shell's `/` palette): the pane shows the query's
+   * matches ranked best first, as a flat list. Purely in-memory over the
+   * loaded workspace — no file reads, no store.
+   */
+  beginFilter(): void;
+  /** Replace the filter query; the highlight returns to the top match. */
+  setFilterQuery(query: string): void;
+  /** Leave filter mode; the grouped list returns with the pre-search highlight. */
+  endFilter(): void;
+  /**
+   * Navigation keys inside filter mode (up/down move the match highlight,
+   * enter opens it through the pane's own enter path); true = consumed.
+   */
+  filterKey(key: ParsedKeyLike): boolean;
+  /** True while the search filter is active. */
+  readonly filtering: boolean;
+  /** Matches for the current query (null when not filtering). */
+  readonly filteredCount: number | null;
 }
 
 /** One flattened, renderable row of the pane (a group header or a request). */
@@ -81,7 +102,7 @@ export function startCollectionsPane(
   const state = {
     groups: [] as CollectionGroup[],
     items: [] as LoadedRequest[],
-    /** Highlighted request (moves with j/k), as an index into `items`. */
+    /** Highlighted request (moves with j/k), as an index into the shown list. */
     cursor: null as number | null,
     /** The request currently open in the composer, tracked by module name. */
     selectedName: null as string | null,
@@ -89,6 +110,15 @@ export function startCollectionsPane(
     focused: true, // the shell's first pane starts focused
     firstVisible: 0, // scroll window start, in flattened terminal rows
     previousCount: 0,
+    /**
+     * Search-filter mode: non-null holds the query, and the pane shows its
+     * ranked matches (flat list) instead of the grouped tree.
+     */
+    filterQuery: null as string | null,
+    /** Highlight to restore when the filter closes, tracked by module name. */
+    savedCursorName: null as string | null,
+    /** Match count of the last render (the status bar reads it). */
+    matchCount: null as number | null,
   };
 
   let tail: Promise<void> = Promise.resolve();
@@ -102,22 +132,44 @@ export function startCollectionsPane(
     return done;
   };
 
+  /**
+   * The list the pane currently shows: the full workspace, or the query's
+   * ranked matches. Ranking is in-memory only (rule_docs_no_store spirit:
+   * search never touches the filesystem), memoized per (query, items) so a
+   * refresh landing mid-search re-filters against fresh items while every
+   * other call in the same render pass reuses one ranking.
+   */
+  let ranked: { query: string; items: LoadedRequest[]; matches: LoadedRequest[] } | null = null;
+  const shown = (): LoadedRequest[] => {
+    if (state.filterQuery === null) return state.items;
+    if (ranked?.query !== state.filterQuery || ranked.items !== state.items) {
+      ranked = { query: state.filterQuery, items: state.items, matches: rankRequests(state.filterQuery, state.items) };
+    }
+    state.matchCount = ranked.matches.length;
+    return ranked.matches;
+  };
+
   const flatRows = (): FlatRow[] => {
     const rows: FlatRow[] = [];
-    let index = 0;
+    if (state.filterQuery !== null) {
+      // Filtered: a flat ranked list — group headers would scramble the ranking.
+      shown().forEach((request, index) => rows.push({ kind: "request", request, index }));
+      return rows;
+    }
+    // The cursor (and every index the pane reasons about) points into
+    // `items`, so rows carry each request's position THERE — not its
+    // display position, which the group sort reorders.
+    const itemsIndex = new Map(state.items.map((request, index) => [request, index]));
     for (const group of state.groups) {
       rows.push({ kind: "header", title: group.title });
       for (const request of group.requests) {
-        rows.push({ kind: "request", request, index });
-        index += 1;
+        rows.push({ kind: "request", request, index: itemsIndex.get(request) ?? 0 });
       }
     }
     return rows;
   };
 
-  const visibleRows = (): number => {
-    return Math.max(1, renderer.height - CHROME_ROWS);
-  };
+  const visibleRows = (): number => Math.max(1, renderer.height - CHROME_ROWS);
 
   const render = (): void => {
     clearChildren(pane);
@@ -126,7 +178,11 @@ export function startCollectionsPane(
       return;
     }
     if (state.items.length === 0) {
-      renderEmptyState(renderer, pane);
+      renderCollectionsEmptyState(renderer, pane);
+      return;
+    }
+    if (state.filterQuery !== null && shown().length === 0) {
+      renderNoMatches(renderer, pane, state.filterQuery);
       return;
     }
     const rows = flatRows();
@@ -141,6 +197,9 @@ export function startCollectionsPane(
       }
       top += height;
     }
+    // Room left under a short list gets the mockup's halftone dots — but
+    // only when the decoration itself fits, so nothing ever overflows.
+    if (top + DECOR_SIZE.height <= visibleRows()) pane.add(halftoneTail(renderer));
   };
 
   /** Keep the highlighted request's selection box fully inside the window. */
@@ -168,13 +227,26 @@ export function startCollectionsPane(
   };
 
   const moveCursor = (delta: 1 | -1): void => {
-    if (state.items.length === 0) return;
-    // From no highlight, j picks the first module and k the last.
-    if (state.cursor === null) {
-      state.cursor = delta === 1 ? 0 : state.items.length - 1;
+    // j/k walk the pane's DISPLAYED request order (grouped in browse mode,
+    // ranked while filtering); each row carries the index its mode reasons
+    // in, so the cursor stays in that index space while never jumping
+    // visually across groups.
+    const requests = flatRows().filter(row => row.kind === "request");
+    if (requests.length === 0) return;
+    const at =
+      state.cursor === null
+        ? -1
+        : requests.findIndex(row => row.kind === "request" && row.index === state.cursor);
+    let next: number;
+    if (at === -1) {
+      // From no highlight (or a cursor its rows no longer carry), j picks
+      // the first displayed request and k the last.
+      next = delta === 1 ? 0 : requests.length - 1;
     } else {
-      state.cursor = (state.cursor + delta + state.items.length) % state.items.length;
+      next = (at + delta + requests.length) % requests.length;
     }
+    const row = requests[next];
+    if (row?.kind === "request") state.cursor = row.index;
     ensureVisible();
     render();
   };
@@ -210,13 +282,14 @@ export function startCollectionsPane(
       // The cursor follows its module by NAME, so a refresh never makes the
       // highlight drift to a neighbor. A deleted highlight clears instead of
       // being silently re-pointed — except on the very first listing, which
-      // places the highlight like the mockup.
+      // places the highlight like the mockup. The name is read from the list
+      // the cursor currently indexes (ranked matches while filtering).
       const previousName =
-        state.cursor === null ? null : (state.items[state.cursor]?.name ?? null);
+        state.cursor === null ? null : (shown()[state.cursor]?.name ?? null);
       state.items = requests;
       state.groups = groupByCollection(requests);
       const kept =
-        previousName === null ? -1 : state.items.findIndex(item => item.name === previousName);
+        previousName === null ? -1 : shown().findIndex(item => item.name === previousName);
       state.cursor = kept >= 0 ? kept : null;
       if (state.cursor === null && state.items.length > 0 && state.previousCount === 0) {
         state.cursor = 0;
@@ -232,12 +305,28 @@ export function startCollectionsPane(
       state.cursor = null;
       state.previousCount = 0;
       state.selectedName = null;
+      state.matchCount = null; // the count died with its list — never linger on the bar
       options.onSelectionLost?.();
     }
     render();
   };
 
   const refresh = (): Promise<void> => enqueue(runRefresh);
+
+  /** The module name the highlight sits on, in whichever list is shown. */
+  const cursorName = (): string | null =>
+    state.cursor === null ? null : (shown()[state.cursor]?.name ?? null);
+
+  /**
+   * Open whatever the highlight sits on, through the pane's own path — the
+   * same onOpen handoff browse mode uses, so search-enter and tree-enter
+   * cannot diverge. Used by handleKey and by the shell's search palette.
+   */
+  const openHighlighted = (): void => {
+    if (state.cursor === null) return;
+    const request = shown()[state.cursor];
+    if (request !== undefined) void openSelected(request.name);
+  };
 
   const handleKey = (key: ParsedKeyLike): boolean => {
     if (!state.focused || key.ctrl) return false;
@@ -250,13 +339,57 @@ export function startCollectionsPane(
       return true;
     }
     if (key.name === "return" || key.name === "enter") {
-      if (state.cursor !== null) {
-        const name = state.items[state.cursor]?.name;
-        if (name !== undefined) void openSelected(name);
-      }
+      openHighlighted();
       return true;
     }
     return false;
+  };
+
+  /** Navigation keys inside filter mode; the shell's search palette calls this. */
+  const filterKey = (key: ParsedKeyLike): boolean => {
+    if (key.ctrl) return false;
+    if (key.name === "down" || key.name === "up") {
+      moveCursor(key.name === "down" ? 1 : -1);
+      return true;
+    }
+    if (key.name === "return" || key.name === "enter") {
+      openHighlighted();
+      return true;
+    }
+    return false;
+  };
+
+  const beginFilter = (): void => {
+    state.filterQuery = "";
+    state.savedCursorName = cursorName();
+    state.matchCount = 0;
+    state.cursor = state.items.length > 0 ? 0 : null;
+    state.firstVisible = 0;
+    render();
+  };
+
+  const setFilterQuery = (query: string): void => {
+    if (state.filterQuery === null) return; // not filtering: ignore stray input
+    state.filterQuery = query;
+    state.cursor = shown().length > 0 ? 0 : null; // typing restarts at the top match
+    state.firstVisible = 0;
+    render();
+  };
+
+  const endFilter = (): void => {
+    if (state.filterQuery === null) return;
+    // The highlight follows whatever was on screen (or the pre-search
+    // highlight when nothing matched) back into the full list, by name —
+    // read before the filter lifts, while `shown()` is still the match list.
+    const keep = cursorName() ?? state.savedCursorName;
+    state.filterQuery = null;
+    state.cursor = keep === null ? null : state.items.findIndex(item => item.name === keep);
+    if (state.cursor === -1) state.cursor = null;
+    state.savedCursorName = null;
+    state.matchCount = null;
+    state.firstVisible = 0;
+    ensureVisible();
+    render();
   };
 
   const syncFocus = (focusedPane: string | null): void => {
@@ -275,5 +408,11 @@ export function startCollectionsPane(
     settled: () => tail,
     handleKey,
     syncFocus,
+    beginFilter,
+    setFilterQuery,
+    endFilter,
+    filterKey,
+    get filtering(): boolean { return state.filterQuery !== null; },
+    get filteredCount(): number | null { return state.matchCount; },
   };
 }

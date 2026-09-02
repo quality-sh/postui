@@ -43,12 +43,15 @@ describe("globalAction", () => {
     expect(globalAction({ name: "c", ctrl: true })).toBe("quit");
   });
 
-  test("navigation, send, and search are reserved for their panes and stay inert", () => {
+  test("navigation and send are reserved for their panes and stay inert", () => {
     expect(globalAction({ name: "j", ctrl: false })).toBeNull();
     expect(globalAction({ name: "k", ctrl: false })).toBeNull();
     expect(globalAction({ name: "return", ctrl: false })).toBeNull();
     expect(globalAction({ name: "enter", ctrl: false })).toBeNull();
-    expect(globalAction({ name: "/", ctrl: false })).toBeNull();
+  });
+
+  test("/ opens the search palette at shell level", () => {
+    expect(globalAction({ name: "/", ctrl: false })).toBe("search");
   });
 
   test("unmapped keys are inert", () => {

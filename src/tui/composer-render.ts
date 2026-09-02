@@ -4,7 +4,7 @@ import type { RequestDraft } from "./composer-send.ts";
 import { isCredentialHeader, redactHeaders } from "../send/redact.ts";
 import type { LoadedRequest } from "../gen/load.ts";
 import { isMutatingMethod } from "./collection-groups.ts";
-import { numberedLines, tabsRow } from "./render.ts";
+import { numberedLines, renderEmptyState, tabsRow } from "./render.ts";
 import type { ComposerTab } from "./composer.ts";
 import { THEME } from "./theme.ts";
 
@@ -39,20 +39,11 @@ export function renderComposerPane(
 ): void {
   if (state.request === null || state.draft === null) {
     pane.title = "COMPOSER";
-    pane.add(
-      new TextRenderable(renderer, {
-        content: "no request loaded",
-        fg: THEME.color.text,
-        width: "100%",
-      }),
-    );
-    pane.add(
-      new TextRenderable(renderer, {
-        content: "select one in collections (⏎)",
-        fg: THEME.color.dim,
-        width: "100%",
-      }),
-    );
+    // The one shared empty-state style: what is missing plus the way out.
+    renderEmptyState(renderer, pane, [
+      { text: "no request loaded", tone: "text" },
+      { text: "select one in collections (⏎)", tone: "dim" },
+    ]);
     return;
   }
 

@@ -3,9 +3,12 @@
  *
  * Display side: `GLOBAL_KEYS` renders exactly as in the mockup's bottom bar
  * ("⏎ send" — the composer owns enter). Input side: `globalAction` maps a
- * parsed key to an app-level action. Pane-level keys (j/k navigation, enter
- * run/open, / search) are reserved for the panes that own them
- * (collections/composer/search) and stay inert here.
+ * parsed key to an app-level action. Pane-level keys (j/k navigation,
+ * enter run/open) are reserved for the panes that own them
+ * (collections/composer) and stay inert here; "/" is app-level because the
+ * search palette is shell chrome (it replaces the status bar), and while it
+ * is open every printable key — including a literal "/" — types into the
+ * query before this map ever sees it.
  */
 export interface KeyHint {
   readonly key: string;
@@ -24,7 +27,7 @@ export const GLOBAL_KEYS: readonly KeyHint[] = [
 ] as const;
 
 /** App-level actions the shell itself handles. */
-export type GlobalAction = "quit" | "focus-next" | "focus-previous";
+export type GlobalAction = "quit" | "focus-next" | "focus-previous" | "search";
 
 /** Minimal shape of a parsed keypress (a subset of OpenTUI's KeyEvent). */
 export interface ParsedKeyLike {
@@ -35,12 +38,13 @@ export interface ParsedKeyLike {
 
 /** Map a parsed keypress to a shell action, or null when the key is inert. */
 export function globalAction(key: ParsedKeyLike): GlobalAction | null {
-  // Note for the composer/search tickets: when a pane owns a text input, its
-  // key handler must consume printable keys (including "q" and "/") before
-  // they reach this global map — e.g. by checking whether the focused pane
-  // is editing.
+  // Note for panes with a text input (composer edit, search): their key
+  // handler must consume printable keys (including "q" and "/") before
+  // they reach this global map — by running before it in the shell's
+  // key listener.
   if (key.ctrl && key.name === "c") return "quit";
   if (key.name === "q") return "quit";
   if (key.name === "tab") return key.shift === true ? "focus-previous" : "focus-next";
+  if (key.name === "/") return "search";
   return null;
 }

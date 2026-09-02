@@ -2,7 +2,7 @@ import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/co
 import type { CliRenderer, TextChunk } from "@opentui/core";
 import { scrubSecrets } from "../send/redact.ts";
 import type { SendResult } from "../send/send.ts";
-import { errorLine, numberedLines, tabsRow } from "./render.ts";
+import { errorLine, emptyStateBox, numberedLines, renderEmptyState, tabsRow } from "./render.ts";
 import { THEME } from "./theme.ts";
 
 /**
@@ -93,9 +93,12 @@ export function renderResponsePane(
     // TESTS is meaningful before any send: the workspace's generated tests.
     for (const row of testsView(renderer, state)) pane.add(row);
   } else {
-    pane.add(
-      diagnosticText(renderer, "no response yet — select a request in collections and press ⏎", THEME.color.text),
-    );
+    // The one shared empty-state style, scoped to the area under the
+    // status line and tabs.
+    renderEmptyState(renderer, pane, [
+      { text: "no response yet", tone: "text" },
+      { text: "select a request in collections and press ⏎", tone: "dim" },
+    ]);
   }
 
   if (state.note !== null) {
@@ -198,7 +201,7 @@ function tabView(
   state: ResponseRenderState,
   result: SendResult,
   secrets: string[],
-): TextRenderable[] {
+): (TextRenderable | BoxRenderable)[] {
   if (state.tab === "body") return bodyView(renderer, state, result, secrets);
   if (state.tab === "headers") return headersView(renderer, result, secrets);
   return testsView(renderer, state);
@@ -245,9 +248,17 @@ function headersView(renderer: CliRenderer, result: SendResult, secrets: string[
   ];
 }
 
-function testsView(renderer: CliRenderer, state: ResponseRenderState): TextRenderable[] {
+function testsView(
+  renderer: CliRenderer,
+  state: ResponseRenderState,
+): (TextRenderable | BoxRenderable)[] {
   if (state.requestName === null) {
-    return [diagnosticText(renderer, "no request selected", THEME.color.text)];
+    return [
+      emptyStateBox(renderer, [
+        { text: "no request selected", tone: "text" },
+        { text: "open one in collections (⏎)", tone: "dim" },
+      ]),
+    ];
   }
   if (state.tests.forName !== state.requestName) {
     // The listing in hand belongs to a different (or previous) request —
@@ -258,10 +269,13 @@ function testsView(renderer: CliRenderer, state: ResponseRenderState): TextRende
     return [diagnosticText(renderer, errorLine(state.tests.error), THEME.color.accent)];
   }
   if (state.tests.files.length === 0) {
-    // The honest empty state the ticket asks for, worded like the CLI's hint.
+    // The honest empty state the ticket asks for, worded like the CLI's hint,
+    // in the one shared empty-state style.
     return [
-      diagnosticText(renderer, `no generated tests for ${state.requestName}`, THEME.color.text),
-      diagnosticText(renderer, "run postui gen", THEME.color.bright),
+      emptyStateBox(renderer, [
+        { text: `no generated tests for ${state.requestName}`, tone: "text" },
+        { text: "run postui gen", tone: "bright" },
+      ]),
     ];
   }
   return state.tests.files.map(file =>

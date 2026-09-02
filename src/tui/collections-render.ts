@@ -2,7 +2,7 @@ import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/co
 import type { CliRenderer } from "@opentui/core";
 import type { LoadedRequest } from "../gen/load.ts";
 import { isMutatingMethod } from "./collection-groups.ts";
-import { errorName, namedErrorText } from "./render.ts";
+import { errorName, namedErrorText, renderEmptyState } from "./render.ts";
 import { THEME } from "./theme.ts";
 
 /** One text line plus the selection box's top/bottom border. */
@@ -10,43 +10,54 @@ export const REQUEST_ROW_HEIGHT = 3;
 // Pane inner width 28 - marker (2) - method column (6), minus slack.
 const MAX_NAME_CHARS = 18;
 
-/** The mockup's empty state, worded like the CLI's "nothing to generate" hint. */
-export function renderEmptyState(renderer: CliRenderer, pane: BoxRenderable): void {
-  const empty = new BoxRenderable(renderer, {
-    flexDirection: "column",
-    justifyContent: "center",
-    alignItems: "center",
-    width: "100%",
-    height: "100%",
-    gap: 1,
-  });
-  empty.add(
-    new TextRenderable(renderer, {
-      content: "no saved requests found",
-      fg: THEME.color.text,
-    }),
+/**
+ * The pane's empty state, in the one shared style: what is missing plus the
+ * way out, worded like the CLI's "nothing to generate" hint. The halftone
+ * decoration comes along — this is the mockup's dotted left rail.
+ */
+export function renderCollectionsEmptyState(renderer: CliRenderer, pane: BoxRenderable): void {
+  renderEmptyState(
+    renderer,
+    pane,
+    [
+      { text: "no saved requests found", tone: "text" },
+      { text: "in requests/", tone: "text" },
+      { text: "save one with", tone: "dim" },
+      { text: "postui save", tone: "bright" },
+    ],
+    { decor: true },
   );
-  empty.add(
-    new TextRenderable(renderer, { content: "in requests/", fg: THEME.color.text }),
+}
+
+/** The filter found nothing: same style, honest wording, no fake results. */
+export function renderNoMatches(
+  renderer: CliRenderer,
+  pane: BoxRenderable,
+  query: string,
+): void {
+  renderEmptyState(
+    renderer,
+    pane,
+    [
+      { text: `no matches for "${query}"`, tone: "text" },
+      { text: "esc goes back to browsing", tone: "dim" },
+    ],
+    { decor: true },
   );
-  empty.add(
-    new TextRenderable(renderer, { content: "save one with", fg: THEME.color.dim }),
-  );
-  empty.add(
-    new TextRenderable(renderer, { content: "postui save", fg: THEME.color.bright }),
-  );
-  pane.add(empty);
 }
 
 /** A failed workspace read renders as the named error it is — never a crash. */
 export function renderError(renderer: CliRenderer, pane: BoxRenderable, error: unknown): void {
-  const text = new TextRenderable(renderer, {
-    content: namedErrorText(errorName(error), error),
-    fg: THEME.color.text,
-    wrapMode: "word",
-    width: "100%",
-  });
-  pane.add(text);
+  pane.add(
+    new TextRenderable(renderer, {
+      content: new StyledText([
+        bold(fg(THEME.color.accent)("✗ ")),
+        fg(THEME.color.text)(namedErrorText(errorName(error), error)),
+      ]),
+      wrapMode: "word",
+      width: "100%",
+    }),
+  );
 }
 
 /** Collection header: the mockup's "▾ Users" line. */

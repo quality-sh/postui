@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
-import type { CliRenderer, TextChunk } from "@opentui/core";
+import type { CliRenderer } from "@opentui/core";
 import { COLLECTIONS_PANE_ID, startCollectionsPane } from "./collections.ts";
 import type { CollectionsPane } from "./collections.ts";
 import { COMPOSER_PANE_ID, startComposerPane } from "./composer.ts";
@@ -8,8 +8,11 @@ import type { ComposerPane } from "./composer.ts";
 import { RESPONSE_PANE_ID, startResponsePane } from "./response-pane.ts";
 import type { ResponsePane } from "./response-pane.ts";
 import { FocusRegistry } from "./focus.ts";
-import { GLOBAL_KEYS, globalAction } from "./keymap.ts";
-import type { KeyHint, ParsedKeyLike } from "./keymap.ts";
+import { globalAction } from "./keymap.ts";
+import type { ParsedKeyLike } from "./keymap.ts";
+import { halftoneBox } from "./render.ts";
+import { startStatusBar } from "./status-bar.ts";
+import type { SearchBarState, StatusBarMode } from "./status-bar.ts";
 import { THEME } from "./theme.ts";
 
 export { COLLECTIONS_PANE_ID, COMPOSER_PANE_ID, RESPONSE_PANE_ID };
@@ -32,17 +35,22 @@ export interface ShellOptions {
 export interface Shell {
   /** App-level pane focus; the shell keeps its border state in sync. */
   readonly focus: FocusRegistry;
-  /** The collections pane (request tree, navigation). */
+  /** The collections pane (request tree, navigation, search filter). */
   readonly collections: CollectionsPane;
   /** The composer (method, URL, tabs, body editor, send). */
   readonly composer: ComposerPane;
   /** The response pane (status line, BODY/HEADERS/TESTS, diagnostics). */
   readonly response: ResponsePane;
+  /** True while the `/` search palette owns the keys. */
+  readonly searching: boolean;
   /** Resolves once a quit key was pressed. */
   readonly onQuit: Promise<"quit">;
   /** Detach the shell's key listener (renderer.destroy() handles the rest). */
   dispose(): void;
 }
+
+/** Placeholder binding so the status bar can be rebound after full setup. */
+const noop = (): void => {};
 
 /**
  * Build the application shell on a renderer: header bar, collections pane
@@ -57,6 +65,12 @@ export interface Shell {
  * (j/k in collections; editing, h/l, enter in the composer; +/- and h/l in
  * the response) are offered to the pane first; everything else falls through
  * to the global map.
+ *
+ * The `/` search is shell-level: it opens the palette (status bar becomes
+ * the query input, collections shows ranked matches), consumes every key
+ * while open — including "q" and "/" — and hands enter/arrow keys to the
+ * collections pane's filter path. The status bar names the active mode:
+ * browsing (key map), searching (query), sending (send in flight).
  */
 export function startShell(renderer: CliRenderer, options: ShellOptions): Shell {
   const focus = new FocusRegistry();
@@ -81,7 +95,30 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     testsDir,
     onWindowChange: (window) => composer.send(window),
   });
-  const composer = startComposerPane(renderer, { diagnostics: response });
+  // Send-state tracking for the status bar: the composer's diagnostics are
+  // the one place a send starts and settles, so the shell watches them.
+  let sendInFlight = false;
+  let repaintStatusBar: () => void = noop; // rebound once the bar exists
+  const composer = startComposerPane(renderer, {
+    diagnostics: {
+      showSending: () => {
+        response.showSending();
+        sendInFlight = true;
+        repaintStatusBar();
+      },
+      showResult: (result, latencyMs, extraSecrets, forName) => {
+        response.showResult(result, latencyMs, extraSecrets, forName);
+        sendInFlight = false;
+        repaintStatusBar();
+      },
+      showError: (error) => {
+        response.showError(error);
+        sendInFlight = false;
+        repaintStatusBar();
+      },
+      showNote: (text) => response.showNote(text),
+    },
+  });
   const collections = startCollectionsPane(renderer, {
     requestsDir: options.requestsDir,
     onOpen: (request) => {
@@ -109,7 +146,86 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   body.add(mainRegion);
   root.add(body);
 
-  root.add(buildStatusBar(renderer));
+  const statusBar = startStatusBar(renderer);
+  root.add(statusBar.pane);
+
+  /** Search-palette state: open flag plus the query typed so far. */
+  const search = { active: false, query: "" };
+
+  repaintStatusBar = (): void => {
+    let mode: StatusBarMode = "browsing";
+    if (search.active) mode = "searching";
+    else if (sendInFlight) mode = "sending";
+    const searchBar: SearchBarState = { query: search.query, matchCount: collections.filteredCount };
+    statusBar.paint(mode, searchBar);
+  };
+
+  const beginSearch = (): void => {
+    search.active = true;
+    search.query = "";
+    collections.beginFilter();
+    repaintStatusBar();
+  };
+
+  const endSearch = (): void => {
+    search.active = false;
+    search.query = "";
+    collections.endFilter();
+    repaintStatusBar();
+  };
+
+  /** Append to the query, refresh the matches and the bar, in one place. */
+  const typeIntoQuery = (text: string): void => {
+    search.query += text;
+    collections.setFilterQuery(search.query);
+    repaintStatusBar();
+  };
+
+  /**
+   * Keys while the palette is open: the query editor consumes everything
+   * printable (a literal "q" or "/" must type, never quit or re-open),
+   * escape goes back to browsing, enter/-arrows drive the match list
+   * through the collections pane. Only ctrl combos fall through to the
+   * global map (ctrl+c stays the quit).
+   */
+  const searchKey = (key: ParsedKeyLike): boolean => {
+    if (key.ctrl) return false;
+    if (key.name === "escape") {
+      endSearch();
+      return true;
+    }
+    if (key.name === "") {
+      // A lone ESC byte parses unnamed (see composer's editor): escape too.
+      endSearch();
+      return true;
+    }
+    if (key.name === "return" || key.name === "enter") {
+      collections.filterKey(key); // open the highlighted match, pane's own path
+      endSearch();
+      return true;
+    }
+    if (key.name === "down" || key.name === "up") {
+      collections.filterKey(key);
+      return true;
+    }
+    if (key.name === "backspace") {
+      search.query = search.query.slice(0, -1);
+      collections.setFilterQuery(search.query);
+      repaintStatusBar();
+      return true;
+    }
+    if (key.name === "tab") return true; // focus must not move mid-search
+    if (key.name === "space") {
+      typeIntoQuery(" ");
+      return true;
+    }
+    // One code POINT (not UTF-16 unit): astral-plane characters type too.
+    if ([...key.name].length === 1) {
+      typeIntoQuery(key.name);
+      return true;
+    }
+    return true; // other named keys (F1, home, …) are inert while typing
+  };
 
   focus.register(COLLECTIONS_PANE_ID);
   focus.register(COMPOSER_PANE_ID);
@@ -128,11 +244,13 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   });
 
   const keyListener = (key: ParsedKeyLike): void => {
+    if (search.active && searchKey(key)) return;
     if (focus.focused === COLLECTIONS_PANE_ID && collections.handleKey(key)) return;
     if (focus.focused === COMPOSER_PANE_ID && composer.handleKey(key)) return;
     if (focus.focused === RESPONSE_PANE_ID && response.handleKey(key)) return;
     const action = globalAction(key);
     if (action === "quit") requestQuit?.();
+    else if (action === "search") beginSearch();
     else if (action === "focus-next") {
       focus.cycle();
       repaintFocus();
@@ -144,12 +262,16 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     }
   };
   renderer.keyInput.on("keypress", keyListener);
+  repaintStatusBar();
 
   return {
     focus,
     collections,
     composer,
     response,
+    get searching(): boolean {
+      return search.active;
+    },
     onQuit,
     dispose: () => {
       renderer.keyInput.off("keypress", keyListener);
@@ -167,7 +289,7 @@ function applyFocus(
   }
 }
 
-/** Header bar: POSTUI wordmark left, workspace center, env badge right. */
+/** Header bar: POSTUI wordmark + halftone left, workspace center, env badge right. */
 function buildHeader(renderer: CliRenderer, options: ShellOptions): BoxRenderable {
   const header = new BoxRenderable(renderer, {
     flexDirection: "row",
@@ -188,12 +310,11 @@ function buildHeader(renderer: CliRenderer, options: ShellOptions): BoxRenderabl
   });
   left.add(
     new TextRenderable(renderer, {
-      content: new StyledText([
-        bold(fg(THEME.color.accent)("P O S T U I")),
-        fg(THEME.color.dim)("· ˙ · ˙ ·"),
-      ]),
+      content: new StyledText([bold(fg(THEME.color.accent)("P O S T U I"))]),
     }),
   );
+  // The mockup's halftone strip fading out beside the wordmark.
+  left.add(halftoneBox(renderer, 16, 1, "top-left"));
   header.add(left);
 
   const center = new BoxRenderable(renderer, {
@@ -221,38 +342,3 @@ function buildHeader(renderer: CliRenderer, options: ShellOptions): BoxRenderabl
   return header;
 }
 
-function buildStatusBar(renderer: CliRenderer): BoxRenderable {
-  const bar = new BoxRenderable(renderer, {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    border: true,
-    borderColor: THEME.color.border,
-    backgroundColor: THEME.color.bg,
-    height: 3,
-    width: "100%",
-  });
-  bar.add(new TextRenderable(renderer, { content: statusText() }));
-  return bar;
-}
-
-/** The key map as styled chunks: bright bold keys, muted labels, dim separators. */
-function statusText(): StyledText {
-  const chunks: TextChunk[] = [];
-  for (const [i, hint] of GLOBAL_KEYS.entries()) {
-    chunks.push(keySeparator(i - 1), ...keyHintChunks(hint));
-  }
-  return new StyledText(chunks);
-}
-
-function keySeparator(position: number): TextChunk {
-  return fg(THEME.color.border)(position < GLOBAL_KEYS.length - 1 ? "  │  " : "");
-}
-
-function keyHintChunks(hint: KeyHint): TextChunk[] {
-  const display = hint.glyph ?? hint.key;
-  return [
-    bold(fg(THEME.color.bright)(display)),
-    fg(THEME.color.text)(` ${hint.label}`),
-  ];
-}
