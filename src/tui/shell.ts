@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
-import type { CliRenderer } from "@opentui/core";
+import type { CliRenderer, MouseEvent } from "@opentui/core";
 import { COLLECTIONS_PANE_ID, startCollectionsPane } from "./collections.ts";
 import type { CollectionsPane } from "./collections.ts";
 import { COMPOSER_PANE_ID, startComposerPane } from "./composer.ts";
@@ -9,7 +9,8 @@ import { RESPONSE_PANE_ID, startResponsePane } from "./response-pane.ts";
 import type { ResponsePane } from "./response-pane.ts";
 import { FocusRegistry } from "./focus.ts";
 import { globalAction } from "./keymap.ts";
-import type { ParsedKeyLike } from "./keymap.ts";
+import type { GlobalAction, ParsedKeyLike } from "./keymap.ts";
+import { settleBorder, sweepBorder } from "./motion.ts";
 import { halftoneBox } from "./render.ts";
 import { startStatusBar } from "./status-bar.ts";
 import type { SearchBarState, StatusBarMode } from "./status-bar.ts";
@@ -134,6 +135,11 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
       // this session; in-memory edits are never clobbered by a refresh.
       if (!composer.edited) composer.load(request);
     },
+    // Enter on the already-open request sends it (the composer stays the
+    // only place a send actually runs; the tree just reaches it).
+    onSend: () => composer.send(),
+    // A row click is direct manipulation of collections: focus follows.
+    onInteract: () => focusPane(COLLECTIONS_PANE_ID),
   });
   const mainRegion = new BoxRenderable(renderer, {
     flexDirection: "column",
@@ -152,12 +158,18 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   /** Search-palette state: open flag plus the query typed so far. */
   const search = { active: false, query: "" };
 
+  let lastPaintedMode: StatusBarMode | null = null;
   repaintStatusBar = (): void => {
     let mode: StatusBarMode = "browsing";
     if (search.active) mode = "searching";
     else if (sendInFlight) mode = "sending";
     const searchBar: SearchBarState = { query: search.query, matchCount: collections.filteredCount };
     statusBar.paint(mode, searchBar);
+    // Mode change feedback: a quick accent flash decaying back to the bar.
+    if (lastPaintedMode !== null && mode !== lastPaintedMode) {
+      sweepBorder(statusBar.pane, THEME.color.accent, THEME.color.border, 220);
+    }
+    lastPaintedMode = mode;
   };
 
   const beginSearch = (): void => {
@@ -235,7 +247,53 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     [COMPOSER_PANE_ID]: composer.pane,
     [RESPONSE_PANE_ID]: response.pane,
   };
-  const repaintFocus = (): void => applyFocus(focus, panes);
+
+  /** Move pane focus to `id` (tab and mouse-click share this exact path). */
+  const focusPane = (id: string): void => {
+    focus.focus(id);
+    repaintFocus();
+    collections.syncFocus(focus.focused);
+  };
+
+  /**
+   * Mouse click-to-focus: a left click anywhere in a pane (its rows,
+   * editor, content — events bubble to the pane box) focuses it, the same
+   * move tab performs.
+   */
+  const focusOnPaneClick = (pane: BoxRenderable, id: string): void => {
+    pane.onMouseDown = (event: MouseEvent): void => {
+      if (event.type !== "down" || event.button !== 0) return;
+      focusPane(id);
+    };
+  };
+  focusOnPaneClick(collections.pane, COLLECTIONS_PANE_ID);
+  focusOnPaneClick(composer.pane, COMPOSER_PANE_ID);
+  focusOnPaneClick(response.pane, RESPONSE_PANE_ID);
+
+  /**
+   * Paint pane borders: the pane GAINING focus sweeps its border into the
+   * accent color (motion confirms the move); panes losing it recede to the
+   * muted border instantly. A repaint of the already-focused pane (initial
+   * paint, refresh) re-asserts the color with no sweep.
+   */
+  let lastFocused: string | null = null;
+  const repaintFocus = (): void => {
+    const current = focus.focused;
+    for (const [id, pane] of Object.entries(panes)) {
+      if (id === current) {
+        if (lastFocused !== null && id !== lastFocused) {
+          sweepBorder(pane, THEME.color.border, THEME.color.accent);
+        } else {
+          pane.borderColor = THEME.color.accent;
+        }
+      } else {
+        // Recede instantly, cancelling any sweep still running toward
+        // accent — otherwise its completion would repaint the stale color.
+        settleBorder(pane, THEME.color.border);
+      }
+    }
+    lastFocused = current;
+  };
   repaintFocus();
 
   let requestQuit: (() => void) | null = null;
@@ -243,23 +301,29 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     requestQuit = () => resolve("quit");
   });
 
+  /**
+   * App-level actions (quit, search, focus moves) after no pane consumed
+   * the key. Split from the listener so each stays readable.
+   */
+  const applyGlobalAction = (action: GlobalAction): void => {
+    if (action === "quit") requestQuit?.();
+    else if (action === "search") beginSearch();
+    else if (action === "focus-next") {
+      const next = focus.cycle();
+      if (next !== null) focusPane(next);
+    } else if (action === "focus-previous") {
+      const previous = focus.cycleBack();
+      if (previous !== null) focusPane(previous);
+    }
+  };
+
   const keyListener = (key: ParsedKeyLike): void => {
     if (search.active && searchKey(key)) return;
     if (focus.focused === COLLECTIONS_PANE_ID && collections.handleKey(key)) return;
     if (focus.focused === COMPOSER_PANE_ID && composer.handleKey(key)) return;
     if (focus.focused === RESPONSE_PANE_ID && response.handleKey(key)) return;
     const action = globalAction(key);
-    if (action === "quit") requestQuit?.();
-    else if (action === "search") beginSearch();
-    else if (action === "focus-next") {
-      focus.cycle();
-      repaintFocus();
-      collections.syncFocus(focus.focused);
-    } else if (action === "focus-previous") {
-      focus.cycleBack();
-      repaintFocus();
-      collections.syncFocus(focus.focused);
-    }
+    if (action !== null) applyGlobalAction(action);
   };
   renderer.keyInput.on("keypress", keyListener);
   repaintStatusBar();
@@ -277,16 +341,6 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
       renderer.keyInput.off("keypress", keyListener);
     },
   };
-}
-
-/** Paint pane borders: accent for the focused pane, muted for the rest. */
-function applyFocus(
-  focus: FocusRegistry,
-  panes: Record<string, BoxRenderable>,
-): void {
-  for (const [id, pane] of Object.entries(panes)) {
-    pane.borderColor = focus.focused === id ? THEME.color.accent : THEME.color.border;
-  }
 }
 
 /** Header bar: POSTUI wordmark + halftone left, workspace center, env badge right. */

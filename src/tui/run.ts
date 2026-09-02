@@ -1,5 +1,6 @@
 import { basename, join } from "node:path";
 import { createCliRenderer } from "@opentui/core";
+import { attachMotion } from "./motion.ts";
 import { startShell } from "./shell.ts";
 import { THEME } from "./theme.ts";
 
@@ -19,18 +20,23 @@ export interface TuiOptions {
  * destroy() (in finally, so every exit path restores) leaves it again,
  * resets the background color and the cursor. Quit resolves with exit
  * status 0; renderer startup failures surface as thrown errors.
+ * attachMotion() drives the border-sweep transitions from the renderer's
+ * frame loop; detachMotion() (also in finally) lands any in-flight sweep
+ * before teardown.
  */
 export async function runTui(options: TuiOptions): Promise<number> {
   const renderer = await createCliRenderer({
     backgroundColor: THEME.color.bg,
     exitOnCtrlC: false,
   });
+  const detachMotion = attachMotion(renderer);
   let shell: ReturnType<typeof startShell>;
   try {
     shell = startShell(renderer, options);
   } catch (e) {
     // The renderer is already on the alternate screen; a failed shell build
     // must still leave the terminal exactly as it found it.
+    detachMotion();
     renderer.destroy();
     throw e;
   }
@@ -39,6 +45,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
     return 0;
   } finally {
     shell.dispose();
+    detachMotion();
     renderer.destroy();
   }
 }

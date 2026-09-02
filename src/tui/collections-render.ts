@@ -73,11 +73,16 @@ export function headerRow(renderer: CliRenderer, title: string): TextRenderable 
  * around the row (the same treatment panes use for focus) — with the "▶"
  * marker; at rest the border is painted in the background color so the
  * layout never shifts when the selection moves.
+ *
+ * With `onSelect`, a left click anywhere on the row selects it (the event
+ * bubbles from the row's text up to this box, so the whole 3-row strip is
+ * the click target) — the same highlight move j/k performs, nothing more.
  */
 export function requestRow(
   renderer: CliRenderer,
   request: LoadedRequest,
   selected: boolean,
+  onSelect?: (request: LoadedRequest) => void,
 ): BoxRenderable {
   const row = new BoxRenderable(renderer, {
     width: "100%",
@@ -86,6 +91,12 @@ export function requestRow(
     borderColor: selected ? THEME.color.accent : THEME.color.bg,
     backgroundColor: THEME.color.bg,
   });
+  if (onSelect !== undefined) {
+    row.onMouseDown = (event) => {
+      if (event.type !== "down" || event.button !== 0) return;
+      onSelect(request);
+    };
+  }
   const method = request.request.method.toUpperCase();
   row.add(
     new TextRenderable(renderer, {
