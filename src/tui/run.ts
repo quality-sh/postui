@@ -8,6 +8,8 @@ export interface TuiOptions {
   readonly envBadge: string;
   /** The workspace's requests folder, browsed by the collections pane. */
   readonly requestsDir: string;
+  /** The workspace's generated-tests folder (response pane's TESTS tab). */
+  readonly testsDir?: string;
 }
 
 /**
@@ -47,5 +49,6 @@ export function tuiOptionsFromEnvironment(cwd: string): TuiOptions {
     workspaceName: basename(cwd) || "workspace",
     envBadge: process.env.POSTUI_ENV ?? "DEV",
     requestsDir: join(cwd, "requests"),
+    testsDir: join(cwd, "tests"),
   };
 }

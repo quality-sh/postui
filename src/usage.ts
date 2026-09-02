@@ -14,7 +14,10 @@ Usage:
   postui run                 Execute the project's own test command
                               (package.json scripts.test); no built-in runner
   postui tui                 Open the interactive workspace browser (TUI):
-                              browse saved requests, quit with q
+                              browse saved requests (j/k, enter opens the
+                              composer), send with enter, widen the response
+                              body window with + (like --body-bytes), quit
+                              with q
   postui send [--json] [--body-bytes <n>] <name>
                              Send saved requests/<name>.ts once, non-interactively.
                              Bounded redacted digest by default (256-byte body

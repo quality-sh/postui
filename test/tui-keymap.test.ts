@@ -6,7 +6,7 @@ describe("GLOBAL_KEYS", () => {
     expect(GLOBAL_KEYS).toEqual([
       { key: "j/k", label: "navigate" },
       { key: "tab", label: "focus" },
-      { key: "enter", label: "run", glyph: "⏎" },
+      { key: "enter", label: "send", glyph: "⏎" },
       { key: "/", label: "search" },
       { key: "q", label: "quit" },
     ]);
@@ -43,7 +43,7 @@ describe("globalAction", () => {
     expect(globalAction({ name: "c", ctrl: true })).toBe("quit");
   });
 
-  test("navigation, run, and search are reserved for later panes and stay inert", () => {
+  test("navigation, send, and search are reserved for their panes and stay inert", () => {
     expect(globalAction({ name: "j", ctrl: false })).toBeNull();
     expect(globalAction({ name: "k", ctrl: false })).toBeNull();
     expect(globalAction({ name: "return", ctrl: false })).toBeNull();

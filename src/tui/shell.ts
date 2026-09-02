@@ -1,13 +1,18 @@
+import { dirname, join } from "node:path";
 import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
 import type { CliRenderer, TextChunk } from "@opentui/core";
 import { COLLECTIONS_PANE_ID, startCollectionsPane } from "./collections.ts";
 import type { CollectionsPane } from "./collections.ts";
+import { COMPOSER_PANE_ID, startComposerPane } from "./composer.ts";
+import type { ComposerPane } from "./composer.ts";
+import { RESPONSE_PANE_ID, startResponsePane } from "./response-pane.ts";
+import type { ResponsePane } from "./response-pane.ts";
 import { FocusRegistry } from "./focus.ts";
 import { GLOBAL_KEYS, globalAction } from "./keymap.ts";
 import type { KeyHint, ParsedKeyLike } from "./keymap.ts";
 import { THEME } from "./theme.ts";
 
-export { COLLECTIONS_PANE_ID };
+export { COLLECTIONS_PANE_ID, COMPOSER_PANE_ID, RESPONSE_PANE_ID };
 
 export interface ShellOptions {
   /** Name shown centered in the header (the workspace the CLI runs in). */
@@ -16,14 +21,23 @@ export interface ShellOptions {
   readonly envBadge: string;
   /** The workspace's requests folder; the collections pane re-reads it on focus. */
   readonly requestsDir: string;
+  /**
+   * The workspace's generated-tests folder (TESTS tab). Defaults to the
+   * `tests` folder beside the requests folder.
+   */
+  readonly testsDir?: string;
 }
 
 /** A started shell attached to a renderer. */
 export interface Shell {
   /** App-level pane focus; the shell keeps its border state in sync. */
   readonly focus: FocusRegistry;
-  /** The collections pane (request tree, navigation, preview). */
+  /** The collections pane (request tree, navigation). */
   readonly collections: CollectionsPane;
+  /** The composer (method, URL, tabs, body editor, send). */
+  readonly composer: ComposerPane;
+  /** The response pane (status line, BODY/HEADERS/TESTS, diagnostics). */
+  readonly response: ResponsePane;
   /** Resolves once a quit key was pressed. */
   readonly onQuit: Promise<"quit">;
   /** Detach the shell's key listener (renderer.destroy() handles the rest). */
@@ -32,15 +46,17 @@ export interface Shell {
 
 /**
  * Build the application shell on a renderer: header bar, collections pane
- * (request tree with preview), status bar. Runs on the real renderer from
- * createCliRenderer() and on the headless createTestRenderer() alike.
+ * (request tree), composer + response region, status bar. Runs on the real
+ * renderer from createCliRenderer() and on the headless
+ * createTestRenderer() alike.
  *
  * Pane focus is owned by the FocusRegistry: the shell paints the focused
  * pane's border in the accent color (the mockup's selected-bar treatment).
  * OpenTUI's native focusable/focusedBorderColor machinery stays unused so
  * there is exactly one source of focus truth. Keys the focused pane owns
- * (j/k, enter in collections) are offered to the pane first; everything
- * else falls through to the global map.
+ * (j/k in collections; editing, h/l, enter in the composer; +/- and h/l in
+ * the response) are offered to the pane first; everything else falls through
+ * to the global map.
  */
 export function startShell(renderer: CliRenderer, options: ShellOptions): Shell {
   const focus = new FocusRegistry();
@@ -60,11 +76,35 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     flexGrow: 1,
     backgroundColor: THEME.color.bg,
   });
-  const mainRegion = buildMainRegion(renderer);
+  const testsDir = options.testsDir ?? join(dirname(options.requestsDir), "tests");
+  const response = startResponsePane(renderer, {
+    testsDir,
+    onWindowChange: (window) => composer.send(window),
+  });
+  const composer = startComposerPane(renderer, { diagnostics: response });
   const collections = startCollectionsPane(renderer, {
     requestsDir: options.requestsDir,
-    mainRegion,
+    onOpen: (request) => {
+      composer.load(request);
+      response.setRequestName(request.name);
+    },
+    onSelectionLost: () => {
+      composer.clear();
+      response.setRequestName(null);
+    },
+    onReload: (request) => {
+      // The module is the source of truth — unless the user edited the draft
+      // this session; in-memory edits are never clobbered by a refresh.
+      if (!composer.edited) composer.load(request);
+    },
   });
+  const mainRegion = new BoxRenderable(renderer, {
+    flexDirection: "column",
+    flexGrow: 1,
+    backgroundColor: THEME.color.bg,
+  });
+  mainRegion.add(composer.pane);
+  mainRegion.add(response.pane);
   body.add(collections.pane);
   body.add(mainRegion);
   root.add(body);
@@ -72,7 +112,13 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   root.add(buildStatusBar(renderer));
 
   focus.register(COLLECTIONS_PANE_ID);
-  const panes: Record<string, BoxRenderable> = { [COLLECTIONS_PANE_ID]: collections.pane };
+  focus.register(COMPOSER_PANE_ID);
+  focus.register(RESPONSE_PANE_ID);
+  const panes: Record<string, BoxRenderable> = {
+    [COLLECTIONS_PANE_ID]: collections.pane,
+    [COMPOSER_PANE_ID]: composer.pane,
+    [RESPONSE_PANE_ID]: response.pane,
+  };
   const repaintFocus = (): void => applyFocus(focus, panes);
   repaintFocus();
 
@@ -83,6 +129,8 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
 
   const keyListener = (key: ParsedKeyLike): void => {
     if (focus.focused === COLLECTIONS_PANE_ID && collections.handleKey(key)) return;
+    if (focus.focused === COMPOSER_PANE_ID && composer.handleKey(key)) return;
+    if (focus.focused === RESPONSE_PANE_ID && response.handleKey(key)) return;
     const action = globalAction(key);
     if (action === "quit") requestQuit?.();
     else if (action === "focus-next") {
@@ -100,6 +148,8 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   return {
     focus,
     collections,
+    composer,
+    response,
     onQuit,
     dispose: () => {
       renderer.keyInput.off("keypress", keyListener);
@@ -169,17 +219,6 @@ function buildHeader(renderer: CliRenderer, options: ShellOptions): BoxRenderabl
   header.add(right);
 
   return header;
-}
-
-function buildMainRegion(renderer: CliRenderer): BoxRenderable {
-  // Hosts the selected request's preview (rendered by the collections
-  // controller); later tickets add the composer and response panes.
-  // Borderless when empty: a framed box would promise content that the
-  // workspace does not have.
-  return new BoxRenderable(renderer, {
-    flexGrow: 1,
-    backgroundColor: THEME.color.bg,
-  });
 }
 
 function buildStatusBar(renderer: CliRenderer): BoxRenderable {

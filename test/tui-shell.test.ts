@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { RGBA } from "@opentui/core";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
-import { COLLECTIONS_PANE_ID, startShell } from "../src/tui/shell.ts";
+import { COLLECTIONS_PANE_ID, COMPOSER_PANE_ID, RESPONSE_PANE_ID, startShell } from "../src/tui/shell.ts";
 import { THEME } from "../src/tui/theme.ts";
 import { flatSpans, frameText } from "./helpers/tui-capture.ts";
 
@@ -39,7 +39,7 @@ describe("postui tui shell", () => {
     const text = frameText(setup, HEIGHT);
     expect(text).toContain("j/k navigate");
     expect(text).toContain("tab focus");
-    expect(text).toContain("⏎ run");
+    expect(text).toContain("⏎ send");
     expect(text).toContain("/ search");
     expect(text).toContain("q quit");
   });
@@ -82,8 +82,15 @@ describe("postui tui shell", () => {
     expect(setup.shell.focus.focused).toBe(COLLECTIONS_PANE_ID);
   });
 
-  test("tab cycles focus through the registry; single pane keeps focus", async () => {
+  test("tab cycles focus: collections → composer → response → collections", async () => {
     const { shell, mockInput, flush } = await setupShell();
+    expect(shell.focus.focused).toBe(COLLECTIONS_PANE_ID);
+    mockInput.pressTab();
+    await flush();
+    expect(shell.focus.focused).toBe(COMPOSER_PANE_ID);
+    mockInput.pressTab();
+    await flush();
+    expect(shell.focus.focused).toBe(RESPONSE_PANE_ID);
     mockInput.pressTab();
     await flush();
     expect(shell.focus.focused).toBe(COLLECTIONS_PANE_ID);
@@ -109,6 +116,7 @@ describe("postui tui shell", () => {
     const { shell, mockInput, flush } = await setupShell();
     mockInput.pressTab({ shift: true });
     await flush();
-    expect(shell.focus.focused).toBe(COLLECTIONS_PANE_ID);
+    // backward from the first pane wraps to the last
+    expect(shell.focus.focused).toBe(RESPONSE_PANE_ID);
   });
 });

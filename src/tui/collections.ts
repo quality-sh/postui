@@ -1,21 +1,17 @@
-import { BoxRenderable, TextRenderable } from "@opentui/core";
+import { BoxRenderable } from "@opentui/core";
 import type { CliRenderer } from "@opentui/core";
-import { readFile } from "node:fs/promises";
 import type { LoadedRequest } from "../gen/load.ts";
 import { groupByCollection } from "./collection-groups.ts";
 import type { CollectionGroup } from "./collection-groups.ts";
 import {
   REQUEST_ROW_HEIGHT,
-  clearChildren,
   headerRow,
-  namedErrorText,
-  previewBox,
-  previewText,
   renderError,
   renderEmptyState,
   requestRow,
 } from "./collections-render.ts";
 import type { ParsedKeyLike } from "./keymap.ts";
+import { clearChildren } from "./render.ts";
 import { THEME } from "./theme.ts";
 import { readWorkspace } from "./workspace.ts";
 
@@ -28,16 +24,27 @@ const CHROME_ROWS = 8;
 export interface CollectionsPaneOptions {
   /** The workspace's requests folder; re-read on every focus regain. */
   readonly requestsDir: string;
-  /** The region to the right where the selected request's preview renders. */
-  readonly mainRegion: BoxRenderable;
+  /** Enter on a request hands it to the shell (the composer loads it). */
+  readonly onOpen: (request: LoadedRequest) => void;
+  /**
+   * The open selection's module vanished from disk (refresh noticed); the
+   * shell clears the composer — the module was its source of truth.
+   */
+  readonly onSelectionLost?: () => void;
+  /**
+   * The open selection survived a refresh and was re-read from disk; the
+   * shell decides whether the composer reloads it (an edited draft wins —
+   * edits are in-memory and must not be clobbered behind the user's back).
+   */
+  readonly onReload?: (request: LoadedRequest) => void;
 }
 
-/** The collections pane controller the shell drives: keys, focus, preview. */
+/** The collections pane controller the shell drives: keys, focus, opening. */
 export interface CollectionsPane {
   readonly pane: BoxRenderable;
   /** Resolves once the initial workspace load has been rendered. */
   readonly ready: Promise<void>;
-  /** Resolves when every refresh/preview read started so far has finished. */
+  /** Resolves when every refresh started so far has finished. */
   settled(): Promise<void>;
   /** Handle a keypress while the pane is focused; true = consumed. */
   handleKey(key: ParsedKeyLike): boolean;
@@ -52,7 +59,7 @@ type FlatRow =
 
 /**
  * The collections pane: every saved request grouped by collection, j/k
- * navigation with wrap-around, enter to open the saved module's preview.
+ * navigation with wrap-around, enter to open the request in the composer.
  * All data comes from readWorkspace() (the shared loader); a refresh on
  * every focus regain makes hand edits and deletions appear without a
  * restart, and a vanished selection clears honestly instead of jumping.
@@ -76,7 +83,7 @@ export function startCollectionsPane(
     items: [] as LoadedRequest[],
     /** Highlighted request (moves with j/k), as an index into `items`. */
     cursor: null as number | null,
-    /** The request whose preview is open, tracked by module name. */
+    /** The request currently open in the composer, tracked by module name. */
     selectedName: null as string | null,
     loadError: null as unknown,
     focused: true, // the shell's first pane starts focused
@@ -85,10 +92,10 @@ export function startCollectionsPane(
   };
 
   let tail: Promise<void> = Promise.resolve();
-  // Serialize workspace work (loads, preview reads). The chained promise is
-  // returned so callers can await exactly the work they enqueued. A step may
-  // enqueue a follow-up step (a refresh re-opening a preview) but must never
-  // await it: the follow-up chains onto the tail this step is occupying.
+  // Serialize workspace reads. The chained promise is returned so callers
+  // can await exactly the work they enqueued. A step may enqueue a follow-up
+  // step but must never await it: the follow-up chains onto the tail this
+  // step is occupying.
   const enqueue = (step: () => Promise<void>): Promise<void> => {
     const done = tail.then(step, step);
     tail = done;
@@ -172,50 +179,38 @@ export function startCollectionsPane(
     render();
   };
 
-  const openPreview = (name: string): Promise<void> =>
+  const openSelected = (name: string): Promise<void> =>
     enqueue(async () => {
       const request = state.items.find(item => item.name === name);
       if (request === undefined) return; // deleted while queued — refresh already handled it
       state.selectedName = name;
-      clearChildren(options.mainRegion);
-      const box = previewBox(renderer, request);
-      options.mainRegion.add(box);
-      let content: string;
-      try {
-        content = previewText(await readFile(request.path, "utf8"));
-      } catch (cause) {
-        box.add(
-          new TextRenderable(renderer, {
-            content: namedErrorText("ReadError", cause),
-            fg: THEME.color.text,
-            wrapMode: "word",
-            width: "100%",
-          }),
-        );
-        return;
-      }
-      box.add(
-        new TextRenderable(renderer, {
-          content,
-          fg: THEME.color.text,
-          wrapMode: "word",
-          width: "100%",
-        }),
-      );
+      options.onOpen(request);
     });
 
-  const closePreview = (): void => {
-    state.selectedName = null;
-    clearChildren(options.mainRegion);
+  /**
+   * Reconcile the open selection after a successful read: a vanished module
+   * clears the selection honestly; a surviving one is handed back fresh so
+   * the open view can follow hand edits.
+   */
+  const reconcileSelection = (): void => {
+    if (state.selectedName === null) return;
+    const fresh = state.items.find(item => item.name === state.selectedName);
+    if (fresh === undefined) {
+      state.selectedName = null;
+      options.onSelectionLost?.();
+      return;
+    }
+    options.onReload?.(fresh);
   };
 
   const runRefresh = async (): Promise<void> => {
     try {
       const requests = await readWorkspace(options.requestsDir);
       state.loadError = null;
-      // The cursor and the open preview follow their module by NAME, so a
-      // refresh never makes the highlight drift to a neighbor. A deleted
-      // selection clears instead of being silently re-pointed.
+      // The cursor follows its module by NAME, so a refresh never makes the
+      // highlight drift to a neighbor. A deleted highlight clears instead of
+      // being silently re-pointed — except on the very first listing, which
+      // places the highlight like the mockup.
       const previousName =
         state.cursor === null ? null : (state.items[state.cursor]?.name ?? null);
       state.items = requests;
@@ -224,20 +219,10 @@ export function startCollectionsPane(
         previousName === null ? -1 : state.items.findIndex(item => item.name === previousName);
       state.cursor = kept >= 0 ? kept : null;
       if (state.cursor === null && state.items.length > 0 && state.previousCount === 0) {
-        state.cursor = 0; // first real listing: place the highlight like the mockup
+        state.cursor = 0;
       }
       state.previousCount = state.items.length;
-      if (
-        state.selectedName !== null &&
-        !state.items.some(item => item.name === state.selectedName)
-      ) {
-        closePreview();
-      } else if (state.selectedName !== null) {
-        // The selection survived: re-read the file so a hand edit shows in
-        // the preview too, not just in the tree. Not awaited — this runs
-        // inside the tail step; enqueue appends the read after this refresh.
-        void openPreview(state.selectedName);
-      }
+      reconcileSelection();
       state.firstVisible = 0;
       ensureVisible();
     } catch (error) {
@@ -246,7 +231,8 @@ export function startCollectionsPane(
       state.groups = [];
       state.cursor = null;
       state.previousCount = 0;
-      closePreview();
+      state.selectedName = null;
+      options.onSelectionLost?.();
     }
     render();
   };
@@ -266,7 +252,7 @@ export function startCollectionsPane(
     if (key.name === "return" || key.name === "enter") {
       if (state.cursor !== null) {
         const name = state.items[state.cursor]?.name;
-        if (name !== undefined) openPreview(name);
+        if (name !== undefined) void openSelected(name);
       }
       return true;
     }

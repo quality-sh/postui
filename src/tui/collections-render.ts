@@ -2,14 +2,13 @@ import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/co
 import type { CliRenderer } from "@opentui/core";
 import type { LoadedRequest } from "../gen/load.ts";
 import { isMutatingMethod } from "./collection-groups.ts";
+import { errorName, namedErrorText } from "./render.ts";
 import { THEME } from "./theme.ts";
 
 /** One text line plus the selection box's top/bottom border. */
 export const REQUEST_ROW_HEIGHT = 3;
 // Pane inner width 28 - marker (2) - method column (6), minus slack.
 const MAX_NAME_CHARS = 18;
-// The preview is a peek, not a pager: past this it says so instead of hiding.
-const MAX_PREVIEW_LINES = 400;
 
 /** The mockup's empty state, worded like the CLI's "nothing to generate" hint. */
 export function renderEmptyState(renderer: CliRenderer, pane: BoxRenderable): void {
@@ -48,18 +47,6 @@ export function renderError(renderer: CliRenderer, pane: BoxRenderable, error: u
     width: "100%",
   });
   pane.add(text);
-}
-
-function errorName(error: unknown): string {
-  if (typeof error === "object" && error !== null && "_tag" in error) {
-    return String((error as { _tag: unknown })._tag);
-  }
-  return error instanceof Error ? error.name : "Error";
-}
-
-export function namedErrorText(name: string, error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return `${name}: ${message}`;
 }
 
 /** Collection header: the mockup's "▾ Users" line. */
@@ -103,33 +90,7 @@ export function requestRow(
   return row;
 }
 
-/** Module names longer than the pane clip with an ellipsis; the preview shows the full module. */
+/** Module names longer than the pane clip with an ellipsis; the composer shows the full module. */
 function displayName(name: string): string {
   return name.length > MAX_NAME_CHARS ? `${name.slice(0, MAX_NAME_CHARS)}…` : name;
-}
-
-export function previewBox(renderer: CliRenderer, request: LoadedRequest): BoxRenderable {
-  return new BoxRenderable(renderer, {
-    flexGrow: 1,
-    width: "100%",
-    border: true,
-    borderColor: THEME.color.border,
-    title: `PREVIEW · ${request.name}.ts`,
-    titleColor: THEME.color.bright,
-    backgroundColor: THEME.color.bg,
-  });
-}
-
-/** Past MAX_PREVIEW_LINES the preview says so instead of silently hiding the rest. */
-export function previewText(content: string): string {
-  const lines = content.replace(/\r\n/g, "\n").split("\n");
-  if (lines.length <= MAX_PREVIEW_LINES) return lines.join("\n");
-  return `${lines.slice(0, MAX_PREVIEW_LINES).join("\n")}\n… (${
-    lines.length - MAX_PREVIEW_LINES
-  } more lines — open the file)`;
-}
-
-export function clearChildren(box: BoxRenderable): void {
-  // getChildren() returns a fresh array, so removal during iteration is safe.
-  for (const child of box.getChildren()) box.remove(child);
 }

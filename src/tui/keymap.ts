@@ -1,10 +1,11 @@
 /**
  * The global key map shown in the status bar and dispatched at app level.
  *
- * Display side: `GLOBAL_KEYS` renders exactly as in the mockup's bottom bar.
- * Input side: `globalAction` maps a parsed key to an app-level action.
- * Pane-level keys (j/k navigation, enter run, / search) are reserved for the
- * panes that own them (collections/composer tickets) and stay inert here.
+ * Display side: `GLOBAL_KEYS` renders exactly as in the mockup's bottom bar
+ * ("⏎ send" — the composer owns enter). Input side: `globalAction` maps a
+ * parsed key to an app-level action. Pane-level keys (j/k navigation, enter
+ * run/open, / search) are reserved for the panes that own them
+ * (collections/composer/search) and stay inert here.
  */
 export interface KeyHint {
   readonly key: string;
@@ -17,7 +18,7 @@ export interface KeyHint {
 export const GLOBAL_KEYS: readonly KeyHint[] = [
   { key: "j/k", label: "navigate" },
   { key: "tab", label: "focus" },
-  { key: "enter", label: "run", glyph: "⏎" },
+  { key: "enter", label: "send", glyph: "⏎" },
   { key: "/", label: "search" },
   { key: "q", label: "quit" },
 ] as const;

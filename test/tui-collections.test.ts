@@ -47,18 +47,20 @@ async function setupCollections(files: Record<string, string> = {}): Promise<Col
 }
 
 /**
- * Tab to a scratch pane and back, driving the shell's real key listener so
- * the collections pane's refresh-on-focus runs exactly as a user triggers it.
- * (pressTab sends a real Tab byte; pressKey("tab") would send the letters.)
+ * Tab all the way around the registry (collections → composer → response →
+ * probe → collections) with real Tab bytes, driving the shell's real key
+ * listener so the collections pane's refresh-on-focus runs exactly as a user
+ * triggers it. Cycling the full length works whatever the registry's size.
+ * (KeyCodes names are uppercase — lowercase "tab" would type the letters.)
  */
 async function refocus(setup: CollectionsSetup): Promise<void> {
   if (!setup.shell.focus.ids.includes("test-probe")) {
     setup.shell.focus.register("test-probe");
   }
-  setup.mockInput.pressTab();
+  const hops = setup.shell.focus.ids.length;
+  setup.mockInput.pressKeys(Array.from({ length: hops }, () => "TAB" as const));
   await setup.flush();
-  setup.mockInput.pressTab();
-  await setup.flush();
+  expect(setup.shell.focus.focused).toBe(COLLECTIONS_PANE_ID);
   await setup.shell.collections.settled();
   await setup.renderOnce();
 }
@@ -144,7 +146,7 @@ describe("collections pane", () => {
     expect(marker?.fg.equals(accent)).toBe(true);
   });
 
-  test("enter opens a preview region with the saved module's content", async () => {
+  test("enter loads the selected request into the composer", async () => {
     const setup = await setupCollections({
       "create-user.ts": moduleSource("POST", "https://api.dev/users", "create-user body marker"),
     });
@@ -153,9 +155,11 @@ describe("collections pane", () => {
     await setup.shell.collections.settled();
     await setup.renderOnce();
     const text = frameText(setup, HEIGHT);
-    expect(text).toContain("PREVIEW");
+    expect(text).toContain("COMPOSER");
     expect(text).toContain("create-user.ts");
-    expect(text).toContain("create-user body marker");
+    expect(text).toContain("POST");
+    expect(text).toContain("https://api.dev/users");
+    expect(setup.shell.composer.loadedName).toBe("create-user");
   });
 
   test("refresh-on-focus shows a hand edit without a restart", async () => {
@@ -175,41 +179,41 @@ describe("collections pane", () => {
     expect(get?.fg.equals(dim)).toBe(true);
   });
 
-  test("refresh-on-focus also re-reads the open preview's file", async () => {
+  test("refresh-on-focus also re-reads the open request into the composer", async () => {
     const setup = await setupCollections({
       "watched.ts": moduleSource("GET", "https://api.dev/users", "original body marker"),
     });
     setup.mockInput.pressEnter();
     await setup.shell.collections.settled();
     await setup.renderOnce();
-    expect(frameText(setup, HEIGHT)).toContain("original body marker");
+    expect(frameText(setup, HEIGHT)).toContain("https://api.dev/users");
     await writeFile(
       join(setup.dir, "watched.ts"),
-      moduleSource("GET", "https://api.dev/users", "hand-edited body marker"),
+      moduleSource("GET", "https://api.dev/health", "hand-edited body marker"),
     );
     await refocus(setup);
     const text = frameText(setup, HEIGHT);
-    expect(text).toContain("hand-edited body marker");
-    expect(text).not.toContain("original body marker");
+    expect(text).toContain("https://api.dev/health"); // the module is the source
+    expect(text).not.toContain("https://api.dev/users");
   });
 
-  test("deleting the selected request clears the selection and closes the preview honestly", async () => {
+  test("deleting the selected request clears the selection and the composer honestly", async () => {
     const setup = await setupCollections({
       "alpha.ts": moduleSource("POST", "https://api.dev/users"),
       "beta.ts": moduleSource("GET", "https://api.dev/users"),
     });
-    setup.mockInput.pressEnter(); // open alpha's preview
+    setup.mockInput.pressEnter(); // load alpha into the composer
     await setup.shell.collections.settled();
     await setup.renderOnce();
-    expect(frameText(setup, HEIGHT)).toContain("PREVIEW");
+    expect(frameText(setup, HEIGHT)).toContain("alpha.ts");
 
     await rm(join(setup.dir, "alpha.ts"));
     await refocus(setup);
     const text = frameText(setup, HEIGHT);
     expect(text).not.toContain("alpha");
-    expect(text).not.toContain("PREVIEW");
     expect(text).not.toContain("▶"); // no highlight invented for beta
     expect(text).toContain("beta");
+    expect(text).toContain("no request loaded"); // the composer cleared
   });
 
   test("deleting an unselected request keeps the selection on its module", async () => {
@@ -266,7 +270,7 @@ describe("collections pane", () => {
       "two.ts": moduleSource("GET", "https://api.dev/users"),
     });
     setup.shell.focus.register("composer-probe");
-    setup.mockInput.pressTab(); // focus leaves collections
+    setup.shell.focus.focus("composer-probe");
     await setup.flush();
     expect(setup.shell.focus.focused).toBe("composer-probe");
     const before = rowContaining(setup, "▶");
@@ -275,16 +279,17 @@ describe("collections pane", () => {
     expect(rowContaining(setup, "▶")).toBe(before);
   });
 
-  test("enter with nothing highlighted is a no-op", async () => {
+  test("enter with nothing highlighted leaves the composer empty", async () => {
     const setup = await setupCollections();
     setup.mockInput.pressEnter();
     await setup.flush();
     await setup.shell.collections.settled();
     await setup.renderOnce();
-    expect(frameText(setup, HEIGHT)).not.toContain("PREVIEW");
+    expect(frameText(setup, HEIGHT)).toContain("no request loaded");
+    expect(setup.shell.composer.loadedName).toBeNull();
   });
 
-  test("a module deleted between refresh and enter shows a named read error, not a crash", async () => {
+  test("a module deleted between refresh and enter still loads the in-memory draft without a crash", async () => {
     const setup = await setupCollections({
       "vanishing.ts": moduleSource("POST", "https://api.dev/users"),
     });
@@ -294,8 +299,10 @@ describe("collections pane", () => {
     await setup.shell.collections.settled();
     await setup.renderOnce();
     const text = frameText(setup, HEIGHT);
-    expect(text).toContain("PREVIEW");
-    expect(text).toContain("ReadError");
+    // The draft was already in memory when enter landed; the composer shows
+    // it and the TUI stays alive.
+    expect(text).toContain("COMPOSER");
+    expect(text).toContain("vanishing.ts");
   });
 
   test("unicode module names and collections render", async () => {
