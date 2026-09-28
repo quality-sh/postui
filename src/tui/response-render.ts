@@ -1,25 +1,31 @@
-import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
-import type { CliRenderer, TextChunk } from "@opentui/core";
+import { BoxRenderable, ScrollBoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
+import type { CliRenderer, Renderable, TextChunk } from "@opentui/core";
 import { scrubSecrets } from "../send/redact.ts";
 import type { SendResult } from "../send/send.ts";
-import { codeBlock } from "./code-block.ts";
+import { codeBlock, developingCodeBlock } from "./code-block.ts";
+import { skeletonLines } from "./fx/skeleton.ts";
 import { highlightJson } from "./json-highlight.ts";
 import type { HighlightedJson } from "./json-highlight.ts";
-import { errorLine, emptyStateBox, renderEmptyState, tabsRow } from "./render.ts";
+import { errorLine, emptyStateBox, tabsRow } from "./render.ts";
+import { busyHeader, errorChunks, formatBytes, resultChunks } from "./response-header.ts";
+import type { BusyHeader, SendStamp, SendTicket } from "./response-header.ts";
+import { developTexts } from "./response-reveal.ts";
 import { THEME } from "./theme.ts";
 
 /**
  * Response pane rendering: the mockup's status line (status code colored —
- * foam for success, love for 4xx/5xx and failed sends — plus latency and size),
- * BODY/HEADERS/TESTS tabs, the body as pretty-printed, colored JSON in a
- * line-numbered block, and the diagnostic region.
+ * foam for success, love for 4xx/5xx and failed sends — plus latency and
+ * size, stamped `#N · HH:MM:SS`), BODY/HEADERS/TESTS tabs, the body as
+ * pretty-printed, colored JSON in a line-numbered block, and the
+ * diagnostic region. While a send runs: a busy header and skeleton fog.
+ * A fresh result (or error) develops in from halftone fog when asked to.
  *
  * REDACTION: every text derived from a send is scrubbed against that send's
  * resolved env values before it is placed in the pane — the same final pass
  * renderDigest() does on the CLI, applied on every path, with no option to
  * skip it (rule_redaction_no_off_switch). Header credential values are
  * already replaced with the fixed marker (REDACTED) by the pipeline's
- * capture.
+ * capture. The develop reveal draws exactly the scrubbed text it is given.
  */
 
 export interface ResponseRenderState {
@@ -27,88 +33,145 @@ export interface ResponseRenderState {
   readonly bodyWindow: number;
   readonly view:
     | { readonly kind: "idle" }
-    | { readonly kind: "sending" }
+    | { readonly kind: "sending"; readonly ticket: SendTicket }
     | {
         readonly kind: "result";
         readonly result: SendResult;
         readonly latencyMs: number;
         readonly extraSecrets: string[];
         readonly forName: string;
+        readonly stamp: SendStamp | null;
       }
-    | { readonly kind: "error"; readonly error: unknown };
+    | { readonly kind: "error"; readonly error: unknown; readonly stamp: SendStamp | null };
   readonly note: string | null;
   readonly requestName: string | null;
   readonly tests: { readonly forName: string | null; readonly files: string[]; readonly error: unknown };
 }
 
+/** Develop this render's content in, seeded (the send number). */
+export interface RenderReveal {
+  readonly seed: number;
+}
+
 const RESPONSE_TABS = ["BODY", "HEADERS", "TESTS"] as const;
 
+/** Frame rows plus the status and tab rows: what the content cannot use. */
+const CHROME_ROWS = 4;
+/** Frame columns plus the pane's horizontal padding. */
+const CHROME_COLS = 4;
+/** Skeleton rows at most: a hint of a body, not a wall. */
+const MAX_SKELETON_ROWS = 8;
+
+/** The pane's content size from its last layout (a first render sees 0). */
+function contentSize(pane: BoxRenderable): { width: number; rows: number } {
+  return { width: Math.max(1, pane.width - CHROME_COLS), rows: Math.max(1, pane.height - CHROME_ROWS) };
+}
+
+/**
+ * Build the pane's children for `state`. Returns the busy header when the
+ * view is a send in flight (its label updates in place). With `reveal`,
+ * a result's or error's content develops in: the body block swaps its
+ * plain lines in when it settles, and developed texts settle on exactly
+ * the text they replaced.
+ */
 export function renderResponsePane(
   renderer: CliRenderer,
   pane: BoxRenderable,
   state: ResponseRenderState,
-): void {
-  const status = statusLine(renderer, pane, state);
+  reveal: RenderReveal | null = null,
+): BusyHeader | null {
+  const busy = state.view.kind === "sending" ? busyHeader(renderer, state.view.ticket) : null;
+  const header = busy === null ? statusChunks(state) : busy.node;
+  const status = statusLine(renderer, pane, header);
   if (status !== null) pane.add(status);
   pane.add(tabsRow(renderer, RESPONSE_TABS, tabIndexOf(state.tab), THEME.color.accent));
 
-  if (state.view.kind === "result") {
-    const { result, extraSecrets } = state.view;
-    // The full scrub list: resolved env values from the pipeline plus any
-    // literal credential values the sent draft carried.
-    const secrets = [...result.secrets, ...extraSecrets];
-    for (const row of tabView(renderer, state, result, secrets)) pane.add(row);
-    // The redirect warning mirrors the CLI's stderr diagnostic; the URL is
-    // scrubbed like every other rendered value.
-    if (result.outcome.redirectedTo !== null) {
-      pane.add(
-        new TextRenderable(renderer, {
-          content: `warning: followed redirect; response describes ${scrubSecrets(result.outcome.redirectedTo, secrets)}`,
-          fg: THEME.color.gold,
-          wrapMode: "word",
-          width: "100%",
-        }),
-      );
-    }
-    // Non-2xx sends carry the pipeline's named rejection; it surfaces on the
-    // diagnostic region exactly as the CLI prints it on stderr.
-    if (result.outcome.kind === "rejected" && result.outcome.error !== undefined) {
-      pane.add(diagnosticText(renderer, errorLine(result.outcome.error), THEME.color.love));
-    }
-    // A send can settle after the user opened a different request; label the
-    // staleness instead of silently conflating two requests' responses.
-    if (
-      state.view.forName !== "" &&
-      state.requestName !== null &&
-      state.view.forName !== state.requestName
-    ) {
-      pane.add(
-        diagnosticText(
-          renderer,
-          `this response is from ${state.view.forName} — ${state.requestName} is loaded now`,
-          THEME.color.muted,
-        ),
-      );
-    }
-  } else if (state.view.kind === "error") {
-    pane.add(diagnosticText(renderer, errorLine(state.view.error), THEME.color.love));
-  } else if (state.view.kind === "sending") {
-    pane.add(diagnosticText(renderer, "sending…", THEME.color.muted));
-  } else if (state.tab === "tests") {
-    // TESTS is meaningful before any send: the workspace's generated tests.
-    for (const row of testsView(renderer, state)) pane.add(row);
-  } else {
-    // The one shared empty-state style, scoped to the area under the
-    // status line and tabs.
-    renderEmptyState(renderer, pane, [
+  const content = contentNodes(renderer, pane, state, reveal);
+  for (const node of content) pane.add(node);
+  if (state.note !== null) pane.add(diagnosticText(renderer, state.note, THEME.color.muted));
+  if (reveal !== null) {
+    // The body block develops itself; the texts around it develop here.
+    const texts = content.filter(node => !(node instanceof ScrollBoxRenderable));
+    developTexts(renderer, texts, { seed: reveal.seed, width: contentSize(pane).width });
+  }
+  return busy;
+}
+
+/** What goes under the tabs for the current view. */
+function contentNodes(
+  renderer: CliRenderer,
+  pane: BoxRenderable,
+  state: ResponseRenderState,
+  reveal: RenderReveal | null,
+): Renderable[] {
+  const { view } = state;
+  if (view.kind === "result") return resultNodes(renderer, pane, state, reveal);
+  if (view.kind === "error") return [diagnosticText(renderer, errorLine(view.error), THEME.color.love)];
+  if (view.kind === "sending") {
+    // Sized like the result's note and code block (zero basis, clipped), so
+    // the pane keeps its height from busy to settled instead of jumping.
+    const room = new BoxRenderable(renderer, {
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: 0,
+      minHeight: 2,
+      width: "100%",
+      overflow: "hidden",
+    });
+    const rows = Math.min(MAX_SKELETON_ROWS, Math.max(1, contentSize(pane).rows - 1));
+    room.add(skeletonLines(renderer, { lines: rows, width: "100%" }));
+    return [room];
+  }
+  // TESTS is meaningful before any send: the workspace's generated tests.
+  if (state.tab === "tests") return testsView(renderer, state);
+  // The one shared empty-state style, scoped to the area under the status
+  // line and tabs.
+  return [
+    emptyStateBox(renderer, [
       { text: "no response yet", tone: "message" },
       { text: "select a request in collections and press ⏎", tone: "hint" },
-    ]);
-  }
+    ]),
+  ];
+}
 
-  if (state.note !== null) {
-    pane.add(diagnosticText(renderer, state.note, THEME.color.muted));
+function resultNodes(
+  renderer: CliRenderer,
+  pane: BoxRenderable,
+  state: ResponseRenderState,
+  reveal: RenderReveal | null,
+): Renderable[] {
+  if (state.view.kind !== "result") return [];
+  const { result, extraSecrets, forName } = state.view;
+  // The full scrub list: resolved env values from the pipeline plus any
+  // literal credential values the sent draft carried.
+  const secrets = [...result.secrets, ...extraSecrets];
+  const nodes: Renderable[] = [];
+  // The redirect warning mirrors the CLI's stderr diagnostic; the URL is
+  // scrubbed like every other rendered value.
+  if (result.outcome.redirectedTo !== null) {
+    nodes.push(
+      new TextRenderable(renderer, {
+        content: `warning: followed redirect; response describes ${scrubSecrets(result.outcome.redirectedTo, secrets)}`,
+        fg: THEME.color.gold,
+        wrapMode: "word",
+        width: "100%",
+      }),
+    );
   }
+  // Non-2xx sends carry the pipeline's named rejection; it surfaces on the
+  // diagnostic region exactly as the CLI prints it on stderr.
+  if (result.outcome.kind === "rejected" && result.outcome.error !== undefined) {
+    nodes.push(diagnosticText(renderer, errorLine(result.outcome.error), THEME.color.love));
+  }
+  // A send can settle after the user opened a different request; label the
+  // staleness instead of silently conflating two requests' responses.
+  if (forName !== "" && state.requestName !== null && forName !== state.requestName) {
+    nodes.push(
+      diagnosticText(renderer, `this response is from ${forName} — ${state.requestName} is loaded now`, THEME.color.muted),
+    );
+  }
+  // The lines under the tab view are built first: the body needs their count.
+  return [...tabView(renderer, { pane, state, result, secrets, reveal, below: nodes.length }), ...nodes];
 }
 
 function tabIndexOf(tab: "body" | "headers" | "tests"): number {
@@ -128,20 +191,25 @@ function tabIndexOf(tab: "body" | "headers" | "tests"): number {
 function statusLine(
   renderer: CliRenderer,
   pane: BoxRenderable,
-  state: ResponseRenderState,
-): TextRenderable | BoxRenderable | null {
-  const chunks = statusChunks(state);
+  header: TextChunk[] | BoxRenderable,
+): Renderable | null {
+  let node: Renderable | null = null;
+  if (header instanceof BoxRenderable) node = header;
+  else if (header.length > 0) node = new TextRenderable(renderer, { content: new StyledText(header) });
   if (hasBorderTitle(pane)) {
-    if (chunks.length === 0) return null;
-    return new TextRenderable(renderer, {
-      content: new StyledText([fg(THEME.color.text)(" "), ...chunks, fg(THEME.color.text)(" ")]),
-      // An opaque background: the spaces must blank the border line under
-      // them (the pane's own fill, which its frame row sits on).
-      bg: THEME.color.panel,
+    if (node === null) return null;
+    const slot = new BoxRenderable(renderer, {
+      // An opaque background with a column of padding each side: the slot
+      // must blank the border line under it (the pane's own fill, which its
+      // frame row sits on).
+      backgroundColor: THEME.color.panel,
+      paddingX: 1,
       position: "absolute",
       top: -1,
       right: 1,
     });
+    slot.add(node);
+    return slot;
   }
   const row = new BoxRenderable(renderer, {
     flexDirection: "row",
@@ -149,7 +217,7 @@ function statusLine(
     width: "100%",
   });
   row.add(new TextRenderable(renderer, { content: new StyledText([bold(fg(THEME.color.text)("RESPONSE"))]) }));
-  if (chunks.length > 0) row.add(new TextRenderable(renderer, { content: new StyledText(chunks) }));
+  if (node !== null) row.add(node);
   return row;
 }
 
@@ -160,77 +228,32 @@ function hasBorderTitle(pane: BoxRenderable): boolean {
   return top && (pane.title ?? "") !== "";
 }
 
-/** Status, latency and size (or the sending / error marker); empty when idle. */
+/** A settled view's status: result chips or the error marker; empty when idle. */
 function statusChunks(state: ResponseRenderState): TextChunk[] {
-  if (state.view.kind === "result") {
-    const { outcome } = state.view.result;
-    const rule = fg(THEME.color.border)(" │ ");
-    return [
-      statusChunk(outcome.status),
-      rule,
-      fg(THEME.color.text)(`${Math.max(1, Math.round(state.view.latencyMs))} ms`),
-      rule,
-      fg(THEME.color.text)(formatBytes(outcome.response.size)),
-    ];
+  const { view } = state;
+  if (view.kind === "result") {
+    const { outcome } = view.result;
+    return resultChunks(outcome.status, view.latencyMs, outcome.response.size, view.stamp);
   }
-  if (state.view.kind === "error") return [bold(fg(THEME.color.love)("✗ error"))];
-  if (state.view.kind === "sending") return [fg(THEME.color.muted)("sending…")];
+  if (view.kind === "error") return errorChunks(view.stamp);
   return [];
 }
 
-function statusChunk(status: number): TextChunk {
-  const label = `${status} ${reasonPhrase(status)}`.trimEnd();
-  // Foam is success; love is the palette's only red, kept for failures.
-  if (status >= 200 && status < 300) return bold(fg(THEME.color.foam)(label));
-  if (status >= 400) return bold(fg(THEME.color.love)(label));
-  return bold(fg(THEME.color.text)(label));
-}
-
-/** Uppercased reason phrase for the codes a human actually meets; else bare code. */
-function reasonPhrase(status: number): string {
-  const phrases: Record<number, string> = {
-    200: "OK",
-    201: "CREATED",
-    202: "ACCEPTED",
-    204: "NO CONTENT",
-    301: "MOVED PERMANENTLY",
-    302: "FOUND",
-    304: "NOT MODIFIED",
-    400: "BAD REQUEST",
-    401: "UNAUTHORIZED",
-    403: "FORBIDDEN",
-    404: "NOT FOUND",
-    405: "METHOD NOT ALLOWED",
-    409: "CONFLICT",
-    410: "GONE",
-    415: "UNSUPPORTED MEDIA TYPE",
-    422: "UNPROCESSABLE ENTITY",
-    429: "TOO MANY REQUESTS",
-    500: "INTERNAL SERVER ERROR",
-    501: "NOT IMPLEMENTED",
-    502: "BAD GATEWAY",
-    503: "SERVICE UNAVAILABLE",
-    504: "GATEWAY TIMEOUT",
-  };
-  return phrases[status] ?? "";
-}
-
-function formatBytes(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+interface TabInput {
+  readonly pane: BoxRenderable;
+  readonly state: ResponseRenderState;
+  readonly result: SendResult;
+  readonly secrets: string[];
+  readonly reveal: RenderReveal | null;
+  /** Rows the diagnostics under the tab view take (one each, a guess). */
+  readonly below: number;
 }
 
 /** The active tab's view, built fresh for each render. */
-function tabView(
-  renderer: CliRenderer,
-  state: ResponseRenderState,
-  result: SendResult,
-  secrets: string[],
-): (TextRenderable | BoxRenderable)[] {
-  if (state.tab === "body") return bodyView(renderer, state, result, secrets);
-  if (state.tab === "headers") return headersView(renderer, result, secrets);
-  return testsView(renderer, state);
+function tabView(renderer: CliRenderer, input: TabInput): Renderable[] {
+  if (input.state.tab === "body") return bodyView(renderer, input);
+  if (input.state.tab === "headers") return headersView(renderer, input.result, input.secrets);
+  return testsView(renderer, input.state);
 }
 
 /**
@@ -240,12 +263,7 @@ function tabView(
  * to the cut (the note says where the window ends); one that is not JSON
  * at all shows raw.
  */
-function bodyView(
-  renderer: CliRenderer,
-  state: ResponseRenderState,
-  result: SendResult,
-  secrets: string[],
-): (TextRenderable | BoxRenderable)[] {
+function bodyView(renderer: CliRenderer, { pane, state, result, secrets, reveal, below }: TabInput): Renderable[] {
   const { response } = result.outcome;
   // Scrub before splitting, formatting, or numbering: a secret spanning a
   // line break (or two JSON tokens) is still one contiguous string here, so
@@ -262,7 +280,13 @@ function bodyView(
   }
   const noteText = new TextRenderable(renderer, { content: note, fg: THEME.color.muted, width: "100%" });
   if (response.excerpt === "") return [noteText];
-  return [noteText, codeBlock(renderer, highlighted(excerpt, response.truncated))];
+  const layout = highlighted(excerpt, response.truncated);
+  if (reveal === null) return [noteText, codeBlock(renderer, layout)];
+  // The note row sits above the block and the diagnostics below it; the
+  // count only decides whether a scroll bar takes a column.
+  const { width, rows } = contentSize(pane);
+  const block = developingCodeBlock(renderer, layout, { width, rows: rows - 1 - below, seed: reveal.seed });
+  return [noteText, block];
 }
 
 /** The last layout, reused while the excerpt is unchanged (tab flips re-render). */
@@ -291,10 +315,7 @@ function headersView(renderer: CliRenderer, result: SendResult, secrets: string[
   ];
 }
 
-function testsView(
-  renderer: CliRenderer,
-  state: ResponseRenderState,
-): (TextRenderable | BoxRenderable)[] {
+function testsView(renderer: CliRenderer, state: ResponseRenderState): Renderable[] {
   if (state.requestName === null) {
     return [
       emptyStateBox(renderer, [
@@ -321,9 +342,7 @@ function testsView(
       ]),
     ];
   }
-  return state.tests.files.map(file =>
-    diagnosticText(renderer, `  tests/${file}`, THEME.color.text),
-  );
+  return state.tests.files.map(file => diagnosticText(renderer, `  tests/${file}`, THEME.color.text));
 }
 
 function diagnosticText(renderer: CliRenderer, text: string, color: string): TextRenderable {

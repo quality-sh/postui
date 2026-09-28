@@ -5,6 +5,7 @@ import { COLLECTIONS_PANE_ID, startCollectionsPane } from "./collections.ts";
 import type { CollectionsPane } from "./collections.ts";
 import { COMPOSER_PANE_ID, startComposerPane } from "./composer.ts";
 import type { ComposerPane } from "./composer.ts";
+import { watchSends } from "./composer-send.ts";
 import { RESPONSE_PANE_ID, startResponsePane } from "./response-pane.ts";
 import type { ResponsePane } from "./response-pane.ts";
 import { FocusRegistry } from "./focus.ts";
@@ -15,6 +16,7 @@ import { bindToaster } from "./fx/notify.ts";
 import { mountToasts } from "./fx/toast.ts";
 import { buildHeader, HEADER_ROWS } from "./header.ts";
 import { settleBorder, sweepBorder, sweepFill } from "./motion.ts";
+import { startSendLifecycle } from "./send-lifecycle.ts";
 import { startStatusBar } from "./status-bar.ts";
 import type { SearchBarState, StatusBar, StatusBarMode } from "./status-bar.ts";
 import { THEME } from "./theme.ts";
@@ -115,27 +117,24 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     testsDir,
     onWindowChange: (window) => composer.send(window),
   });
-  // Send-state tracking for the status bar: the composer's diagnostics are
-  // the one place a send starts and settles, so the shell watches them.
-  let sendInFlight = false;
-  let repaintStatusBar: () => void = noop; // rebound once the bar exists
+  // The status bar exists before the panes that feed its live slot.
+  const statusBar = startStatusBar(renderer);
+  // Send-state tracking: the composer's diagnostics are the one place a
+  // send starts and settles; the lifecycle turns them into the busy view,
+  // the held-back develop and the status bar's live slot.
+  let repaintStatusBar: () => void = noop; // rebound once the bar is mounted
+  const sends = startSendLifecycle({
+    renderer,
+    response,
+    statusBar,
+    onBusyChange: () => repaintStatusBar(),
+  });
+  const unwatchSends = watchSends(target => sends.described(target));
   const composer = startComposerPane(renderer, {
     diagnostics: {
-      showSending: () => {
-        response.showSending();
-        sendInFlight = true;
-        repaintStatusBar();
-      },
-      showResult: (result, latencyMs, extraSecrets, forName) => {
-        response.showResult(result, latencyMs, extraSecrets, forName);
-        sendInFlight = false;
-        repaintStatusBar();
-      },
-      showError: (error) => {
-        response.showError(error);
-        sendInFlight = false;
-        repaintStatusBar();
-      },
+      showSending: () => sends.started(),
+      showResult: (result, latencyMs, extraSecrets, forName) => sends.result(result, latencyMs, extraSecrets, forName),
+      showError: (error) => sends.error(error),
       showNote: (text) => response.showNote(text),
     },
   });
@@ -171,7 +170,6 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   body.add(mainRegion);
   root.add(body);
 
-  const statusBar = startStatusBar(renderer);
   root.add(statusBar.pane);
 
   /** Search-palette state: open flag plus the query typed so far. */
@@ -181,7 +179,7 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   repaintStatusBar = (): void => {
     let mode: StatusBarMode = "browsing";
     if (search.active) mode = "searching";
-    else if (sendInFlight) mode = "sending";
+    else if (sends.busy) mode = "sending";
     const searchBar: SearchBarState = { query: search.query, matchCount: collections.filteredCount };
     statusBar.paint(mode, hintsFor(focus.focused), searchBar);
     // Mode change feedback: the bar's fill flashes the accent's soft tone
@@ -385,6 +383,7 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
       renderer.keyInput.off("keypress", keyListener);
       renderer.keyInput.off("paste", pasteListener);
       bindToaster(null);
+      unwatchSends();
       toasts.destroy();
     },
   };

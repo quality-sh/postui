@@ -176,7 +176,8 @@ describe("collections pane", () => {
     await setup.flush();
     await setup.shell.collections.settled();
     await setup.shell.composer.settled();
-    await setup.renderOnce();
+    // A fast result is held for the busy view's minimum time (220 ms), then shown.
+    await Bun.sleep(250).then(() => setup.renderOnce());
     const text = frameText(setup, HEIGHT);
     expect(text).toContain("COMPOSER");
     expect(text).toContain("create-user.ts");

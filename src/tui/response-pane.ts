@@ -3,10 +3,13 @@ import type { CliRenderer, Renderable } from "@opentui/core";
 import { readdir } from "node:fs/promises";
 import { DEFAULT_BODY_WINDOW } from "../send/response.ts";
 import type { SendResult } from "../send/send.ts";
+import type { SendTarget } from "./composer-send.ts";
+import { fxClock } from "./fx/clock.ts";
 import type { ParsedKeyLike } from "./keymap.ts";
 import { clearChildren } from "./render.ts";
+import type { BusyHeader, SendStamp, SendTicket } from "./response-header.ts";
 import { renderResponsePane } from "./response-render.ts";
-import type { ResponseRenderState } from "./response-render.ts";
+import type { RenderReveal, ResponseRenderState } from "./response-render.ts";
 import { THEME } from "./theme.ts";
 
 /** The pane id used in the shell's focus registry (tab order). */
@@ -35,19 +38,7 @@ const SCROLL_KEYS: Readonly<Record<string, 1 | -1>> = { down: 1, j: 1, up: -1, k
 /** Tab keys: ←/→, with h/l as silent aliases. */
 const TAB_KEYS: Readonly<Record<string, 1 | -1>> = { right: 1, l: 1, left: -1, h: -1 };
 
-type ResponseView =
-  | { readonly kind: "idle" }
-  | { readonly kind: "sending" }
-  | {
-      readonly kind: "result";
-      readonly result: SendResult;
-      readonly latencyMs: number;
-      /** Literal credential values from the sent draft, scrubbed alongside. */
-      readonly extraSecrets: string[];
-      /** The request that produced this result (staleness labeling). */
-      readonly forName: string;
-    }
-  | { readonly kind: "error"; readonly error: unknown };
+type ResponseView = ResponseRenderState["view"];
 
 export interface ResponsePaneOptions {
   /** The workspace's generated-tests folder (root/tests), for the TESTS tab. */
@@ -69,9 +60,26 @@ export interface ResponsePane {
   readonly scrollTop: number;
   /** Handle a keypress while the pane is focused; true = consumed. */
   handleKey(key: ParsedKeyLike): boolean;
-  showSending(): void;
-  showResult(result: SendResult, latencyMs: number, extraSecrets?: string[], forName?: string): void;
-  showError(error: unknown): void;
+  /**
+   * The busy view: spinner, request label and elapsed count on the header,
+   * skeleton fog in the body. Without a ticket the send is unnumbered and
+   * counts from now.
+   */
+  showSending(ticket?: SendTicket): void;
+  /** Name the request in flight (the label updates in place; nothing restarts). */
+  describeSending(target: SendTarget): void;
+  /**
+   * A settled send. `stamp` (`#N · HH:MM:SS`) marks which send it was; the
+   * content develops in on each tab's first show, seeded by the number.
+   */
+  showResult(
+    result: SendResult,
+    latencyMs: number,
+    extraSecrets?: string[],
+    forName?: string,
+    stamp?: SendStamp | null,
+  ): void;
+  showError(error: unknown, stamp?: SendStamp | null): void;
   /** Transient diagnostic text (e.g. "send already in flight"). */
   showNote(text: string): void;
   /** Point the TESTS tab at a request; clears any previous response. */
@@ -127,6 +135,32 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
 
   /** The scrollable content region of the last render; null when nothing scrolls. */
   let scrollArea: ScrollBoxRenderable | null = null;
+  /** The busy header of the last render, while a send is in flight. */
+  let busy: BusyHeader | null = null;
+  /**
+   * The develop reveal: tabs not yet shown since the last settled send
+   * develop in on their first show, seeded by the send number.
+   */
+  const reveal = { seed: 0, pending: new Set<ResponseTab>() };
+
+  /** This render's reveal, if the current tab still owes one (consumed here). */
+  const takeReveal = (): RenderReveal | null => {
+    const { view } = state;
+    if (view.kind !== "result" && view.kind !== "error") return null;
+    if (!reveal.pending.has(state.tab) || fxClock().instant) return null;
+    // A tests listing still being read develops once it arrives.
+    if (view.kind === "result" && state.tab === "tests" && state.tests.forName !== state.requestName) return null;
+    // An error reads the same on every tab: it develops once.
+    if (view.kind === "error") reveal.pending.clear();
+    else reveal.pending.delete(state.tab);
+    return { seed: reveal.seed };
+  };
+
+  /** A settled send: every tab owes a develop. */
+  const revealAll = (stamp: SendStamp | null): void => {
+    reveal.seed = stamp?.number ?? 0;
+    for (const tab of TABS) reveal.pending.add(tab);
+  };
 
   const render = (): void => {
     // A scroll box listens on the renderer; destroy it, not just detach it.
@@ -141,7 +175,7 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
       requestName: state.requestName,
       tests: state.tests,
     };
-    renderResponsePane(renderer, pane, renderState);
+    busy = renderResponsePane(renderer, pane, renderState, takeReveal());
     // Only a result can outgrow the pane; the idle/sending/error states are
     // short and center themselves, which a scroll region would undo.
     // A JSON body brings its own scrolling code block; nesting it in a second
@@ -224,19 +258,32 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
       return scrollArea?.scrollTop ?? 0;
     },
     handleKey,
-    showSending(): void {
-      state.view = { kind: "sending" };
+    showSending(ticket?: SendTicket): void {
+      state.view = { kind: "sending", ticket: ticket ?? { number: 0, startedAt: fxClock().now(), target: null } };
       state.note = null;
       render();
     },
-    showResult(result: SendResult, latencyMs: number, extraSecrets: string[] = [], forName = ""): void {
-      state.view = { kind: "result", result, latencyMs, extraSecrets, forName };
+    describeSending(target: SendTarget): void {
+      if (state.view.kind !== "sending") return;
+      state.view = { kind: "sending", ticket: { ...state.view.ticket, target } };
+      busy?.setTarget(target);
+    },
+    showResult(
+      result: SendResult,
+      latencyMs: number,
+      extraSecrets: string[] = [],
+      forName = "",
+      stamp: SendStamp | null = null,
+    ): void {
+      state.view = { kind: "result", result, latencyMs, extraSecrets, forName, stamp };
       state.note = null;
+      revealAll(stamp);
       render();
     },
-    showError(error: unknown): void {
-      state.view = { kind: "error", error };
+    showError(error: unknown, stamp: SendStamp | null = null): void {
+      state.view = { kind: "error", error, stamp };
       state.note = null;
+      revealAll(stamp);
       render();
     },
     showNote(text: string): void {
