@@ -35,15 +35,15 @@ async function pressAndWatch(setup: PaneSetup): Promise<void> {
   const peak = RGBA.fromHex(blendHex(THEME.color.accentSoft, THEME.color.accent, 0.7));
   expect(setup.collections.handleKey({ name: "return", ctrl: false })).toBe(true);
   await setup.renderOnce();
-  expect(bgUnder(setup, "create-user")?.equals(peak)).toBe(true);
+  expect(bgUnder(setup, "health")?.equals(peak)).toBe(true);
   const bar = flatSpans(setup).find(span => span.text.includes("▌"));
   expect(bar?.fg.equals(RGBA.fromHex(THEME.color.text))).toBe(true);
   setup.clock.advance(300);
   await setup.renderOnce();
-  expect(bgUnder(setup, "create-user")?.equals(soft)).toBe(false); // still lit at 300 ms
+  expect(bgUnder(setup, "health")?.equals(soft)).toBe(false); // still lit at 300 ms
   setup.clock.advance(200);
   await setup.renderOnce();
-  expect(bgUnder(setup, "create-user")?.equals(soft)).toBe(true);
+  expect(bgUnder(setup, "health")?.equals(soft)).toBe(true);
 }
 
 const fogDots = (setup: TestRendererSetup): number =>
@@ -101,7 +101,8 @@ describe("collections pane feel", () => {
     await setup.collections.ready;
     setup.clock.advance(1000); // the first listing's develop is done
     await setup.renderOnce();
-    expect(bgUnder(setup, "create-user")?.equals(RGBA.fromHex(THEME.color.accentSoft))).toBe(true);
+    // the first listing highlights the first displayed row: health (Health sorts before Users)
+    expect(bgUnder(setup, "health")?.equals(RGBA.fromHex(THEME.color.accentSoft))).toBe(true);
     await pressAndWatch(setup);
     // The same request again: the second press must land as visibly as the first.
     await pressAndWatch(setup);
@@ -115,13 +116,13 @@ describe("collections pane feel", () => {
     await setup.renderOnce();
     const rows = frameText(setup, HEIGHT).split("\n");
     const listRow = rows.findIndex(line => line.includes("list-users"));
-    const createRow = rows.findIndex(line => line.includes("create-user"));
+    const healthRow = rows.findIndex(line => line.includes("health"));
     await setup.mockMouse.moveTo(12, listRow);
     await setup.renderOnce();
     expect(bgUnder(setup, "list-users")?.equals(RGBA.fromHex(THEME.color.elementHover))).toBe(true);
-    await setup.mockMouse.moveTo(12, createRow); // the selected row (the first listing's highlight)
+    await setup.mockMouse.moveTo(12, healthRow); // the selected row (the first listing's highlight)
     await setup.renderOnce();
-    expect(bgUnder(setup, "create-user")?.equals(RGBA.fromHex(THEME.color.accentSoft))).toBe(true);
+    expect(bgUnder(setup, "health")?.equals(RGBA.fromHex(THEME.color.accentSoft))).toBe(true);
     expect(bgUnder(setup, "list-users")?.equals(RGBA.fromHex(THEME.color.elementHover))).toBe(false);
   });
 });

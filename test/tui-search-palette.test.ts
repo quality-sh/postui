@@ -241,11 +241,7 @@ describe("search palette", () => {
       "two.ts": moduleSource("GET", "https://api.dev/aaa"),
       "three.ts": moduleSource("GET", "https://api.dev/mmm"),
     });
-    // first listing highlights items[0] = one, displayed last under Users
-    expect(rowContaining(setup, "▌")).toContain("one");
-    setup.mockInput.pressKey("j"); // wraps forward to the first DISPLAYED row
-    await setup.flush();
-    await setup.renderOnce();
+    // the first listing highlights the first DISPLAYED row (two, under Aaa)
     expect(rowContaining(setup, "▌")).toContain("two");
     setup.mockInput.pressKey("j");
     await setup.flush();
