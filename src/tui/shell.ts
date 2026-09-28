@@ -12,9 +12,9 @@ import { attachImportPrompt } from "./import.ts";
 import { globalAction, hintsFor } from "./keymap.ts";
 import type { GlobalAction, ParsedKeyLike } from "./keymap.ts";
 import { buildHeader } from "./header.ts";
-import { settleBorder, sweepBorder } from "./motion.ts";
+import { settleBorder, sweepBorder, sweepFill } from "./motion.ts";
 import { startStatusBar } from "./status-bar.ts";
-import type { SearchBarState, StatusBarMode } from "./status-bar.ts";
+import type { SearchBarState, StatusBar, StatusBarMode } from "./status-bar.ts";
 import { THEME } from "./theme.ts";
 
 export { COLLECTIONS_PANE_ID, COMPOSER_PANE_ID, RESPONSE_PANE_ID };
@@ -52,6 +52,12 @@ export interface Shell {
   readonly composer: ComposerPane;
   /** The response pane (status line, BODY/HEADERS/TESTS, diagnostics). */
   readonly response: ResponsePane;
+  /**
+   * The one-row status bar. Its left side follows focus and search; its
+   * right side is the live-status slot (setStatus / setIndicator) for
+   * whatever runs on its own clock, such as a send in flight.
+   */
+  readonly statusBar: StatusBar;
   /** True while the `/` search palette owns the keys. */
   readonly searching: boolean;
   /** Resolves once a quit key was pressed, or the renderer was destroyed under the shell. */
@@ -176,9 +182,10 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     else if (sendInFlight) mode = "sending";
     const searchBar: SearchBarState = { query: search.query, matchCount: collections.filteredCount };
     statusBar.paint(mode, hintsFor(focus.focused), searchBar);
-    // Mode change feedback: a quick accent flash decaying back to the bar.
+    // Mode change feedback: the bar's fill flashes the accent's soft tone
+    // and decays back to the background (the bar has no frame to sweep).
     if (lastPaintedMode !== null && mode !== lastPaintedMode) {
-      sweepBorder(statusBar.pane, THEME.color.accent, THEME.color.border, 220);
+      sweepFill(statusBar.pane, THEME.color.accentSoft, THEME.color.bg, 220);
     }
     lastPaintedMode = mode;
   };
@@ -290,9 +297,9 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
 
   /**
    * Paint pane borders: the pane GAINING focus sweeps its border into the
-   * accent color (motion confirms the move); panes losing it recede to the
-   * muted border instantly. A repaint of the already-focused pane (initial
-   * paint, refresh) re-asserts the color with no sweep.
+   * accent (motion confirms the move); panes losing it recede to the
+   * resting border color instantly. A repaint of the already-focused pane
+   * (initial paint, refresh) re-asserts the color with no sweep.
    */
   let lastFocused: string | null = null;
   const repaintFocus = (): void => {
@@ -362,6 +369,7 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     collections,
     composer,
     response,
+    statusBar,
     get searching(): boolean {
       return search.active;
     },

@@ -97,10 +97,11 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     flexGrow: 1,
     width: "100%",
     border: true,
+    borderStyle: "rounded",
     borderColor: THEME.color.border,
     title: "COMPOSER",
-    titleColor: THEME.color.bright,
-    backgroundColor: THEME.color.bg,
+    titleColor: THEME.color.text,
+    backgroundColor: THEME.color.panel,
   });
 
   const editor = newEditorState();

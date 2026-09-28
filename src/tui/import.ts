@@ -23,9 +23,9 @@ import { errorLine } from "./render.ts";
  * back to the collections pane. Nothing here reads or writes requests/
  * on its own.
  *
- * The prompt is a centered overlay rather than a status-bar palette like
- * `/` search: a pasted curl runs to several `\` lines, and a parse error
- * belongs next to the text it is about.
+ * The prompt is a dialog over the dimmed app rather than a status-bar
+ * palette like `/` search: a pasted curl runs to several `\` lines, and a
+ * parse error belongs next to the text it is about.
  */
 
 /** A parsed keypress plus the raw text it typed ("A" arrives as name "a"). */
@@ -108,7 +108,7 @@ function startImportPrompt(
   renderer: CliRenderer,
   options: ImportPromptOptions,
 ): ImportPrompt & { readonly pane: BoxRenderable; handlePaste(event: PasteEvent): void } {
-  const pane = importOverlay(renderer);
+  const overlay = importOverlay(renderer);
 
   const state = {
     active: false,
@@ -120,9 +120,9 @@ function startImportPrompt(
   };
 
   const render = (): void => {
-    pane.visible = state.active;
+    overlay.scrim.visible = state.active;
     if (!state.active) return;
-    renderImportPrompt(renderer, pane, {
+    renderImportPrompt(renderer, overlay.dialog, {
       curl: state.curl,
       name: state.name,
       field: state.field,
@@ -241,7 +241,7 @@ function startImportPrompt(
 
   render();
 
-  return { pane, handleKey, handlePaste };
+  return { pane: overlay.scrim, handleKey, handlePaste };
 }
 
 /**

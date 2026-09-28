@@ -1,9 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { RGBA } from "@opentui/core";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { globalAction, hintsFor } from "../src/tui/keymap.ts";
 import { importNote } from "../src/tui/import.ts";
 import { COLLECTIONS_PANE_ID } from "../src/tui/shell.ts";
+import { THEME } from "../src/tui/theme.ts";
 import { HEIGHT, moduleSource, setupApp, teardownApps } from "./helpers/tui-app.ts";
 import type { AppSetup } from "./helpers/tui-app.ts";
 import { frameText, rowContaining } from "./helpers/tui-capture.ts";
@@ -67,6 +69,23 @@ describe("import keys", () => {
 });
 
 describe("import prompt", () => {
+  test("the prompt is a rounded dialog a quarter of the way down, over a dimming scrim", async () => {
+    const app = await setupApp();
+    const bgBefore = app.captureSpans().lines.at(-1)?.spans[0]?.bg;
+    await openImport(app);
+    const rows = frameText(app, HEIGHT).split("\n");
+    const top = rows.findIndex(line => line.includes("╭─IMPORT CURL"));
+    expect(top).toBe(Math.round(HEIGHT / 4));
+    expect(rows.some(line => /╰─+╯/.test(line.slice(line.indexOf("╰"))))).toBe(true);
+    // The status bar under the scrim is darker than it was: the scrim dims it.
+    const bgAfter = app.captureSpans().lines.at(-1)?.spans[0]?.bg;
+    expect(bgBefore?.equals(RGBA.fromHex(THEME.color.bg))).toBe(true);
+    expect(bgAfter?.equals(RGBA.fromHex(THEME.color.bg))).toBe(false);
+    // The dialog itself is the accent-framed panel: it holds the keys.
+    const corner = app.captureSpans().lines[top]?.spans.find(span => span.text.includes("╭"));
+    expect(corner?.fg.equals(RGBA.fromHex(THEME.color.accent))).toBe(true);
+  });
+
   test("ctrl+n opens the overlay from any pane and esc cancels without writing", async () => {
     const app = await setupApp();
     app.mockInput.pressTab(); // composer focused: the key is still global
@@ -123,7 +142,7 @@ describe("import prompt", () => {
 
     expect(app.shell.focus.focused).toBe(COLLECTIONS_PANE_ID);
     expect(app.shell.composer.loadedName).toBe("users");
-    expect(rowContaining(app, "▶")).toContain("users"); // highlighted in the tree
+    expect(rowContaining(app, "▌")).toContain("users"); // highlighted in the tree
     const text = frameText(app, HEIGHT);
     expect(text).toContain("http://127.0.0.1:8984/users"); // composer loaded the URL
     expect(text).toContain("saved users");

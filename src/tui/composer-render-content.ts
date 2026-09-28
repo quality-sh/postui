@@ -57,7 +57,7 @@ export function renderContent(renderer: CliRenderer, box: BoxRenderable, view: C
   }
   tableView(renderer, box, view);
   if (view.editor.tab === "auth") {
-    box.add(line(renderer, [fg(THEME.color.dim)("  values must be env references, e.g. Bearer $API_TOKEN")]));
+    box.add(line(renderer, [fg(THEME.color.muted)("  values must be env references, e.g. Bearer $API_TOKEN")]));
   }
 }
 
@@ -71,12 +71,12 @@ function bodyView(renderer: CliRenderer, box: BoxRenderable, draft: RequestDraft
       const value = entry.file === undefined ? (entry.value ?? "") : `@${entry.file}`;
       box.add(line(renderer, [fg(THEME.color.text)(`  ${entry.name} = ${value}`)]));
     }
-    box.add(line(renderer, [fg(THEME.color.dim)("  form bodies are edited in the saved module")]));
+    box.add(line(renderer, [fg(THEME.color.muted)("  form bodies are edited in the saved module")]));
     return;
   }
   const text = draft.body ?? "";
   if (text === "" && !view.active) {
-    box.add(line(renderer, [fg(THEME.color.text)("  (no body)")]));
+    box.add(line(renderer, [fg(THEME.color.dim)("  (no body)")]));
     return;
   }
   const lines = text.split("\n");
@@ -95,7 +95,7 @@ function bodyView(renderer: CliRenderer, box: BoxRenderable, draft: RequestDraft
     const gutter = fg(THEME.color.dim)(`${String(number + 1).padStart(gutterWidth, " ")} │ `);
     const visible = content.slice(offset);
     const body = view.active && number === cursorLine
-      ? cursorChunks(visible, column - offset, THEME.color.bright)
+      ? cursorChunks(visible, column - offset, THEME.color.text)
       : [fg(THEME.color.text)(visible === "" ? " " : visible)];
     box.add(line(renderer, [gutter, ...body]));
   });
@@ -141,12 +141,12 @@ function tableRow(
   const [name, value] = row;
   const marker = cursor === null ? fg(THEME.color.text)("  ") : fg(THEME.color.accent)("▸ ");
   const nameChunks = cursor?.col === 0
-    ? cursorChunks(name, cursor.pos, THEME.color.bright)
+    ? cursorChunks(name, cursor.pos, THEME.color.text)
     : [fg(THEME.color.text)(name)];
   const credential = isHeader && isCredentialHeader(name);
   let valueChunks: TextChunk[];
   if (cursor?.col === 1) {
-    valueChunks = cursorChunks(credential ? maskCredential(value) : value, cursor.pos, THEME.color.bright);
+    valueChunks = cursorChunks(credential ? maskCredential(value) : value, cursor.pos, THEME.color.text);
   } else {
     valueChunks = credential ? redactedValue(value) : [fg(THEME.color.text)(value)];
   }
@@ -158,9 +158,9 @@ function redactedValue(value: string): TextChunk[] {
   if (value === "") return [fg(THEME.color.dim)("(empty)")];
   const refs = extractEnvRefs(value);
   if (refs.length > 0) {
-    return [fg(THEME.color.text)(REDACTED), fg(THEME.color.dim)(` ← ${refs.map(ref => `$${ref}`).join(" ")}`)];
+    return [fg(THEME.color.text)(REDACTED), fg(THEME.color.muted)(` ← ${refs.map(ref => `$${ref}`).join(" ")}`)];
   }
-  return [fg(THEME.color.text)(REDACTED), fg(THEME.color.accent)(" literal — will not save")];
+  return [fg(THEME.color.text)(REDACTED), fg(THEME.color.gold)(" literal — will not save")];
 }
 
 /**

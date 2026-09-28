@@ -1,7 +1,11 @@
 import type { TestRendererSetup } from "@opentui/core/testing";
 
 /** Minimal structural types for captured span frames (OpenTUI renderer output). */
-type CapturedSpan = { text: string; fg: { equals(v: unknown): boolean } };
+type CapturedSpan = {
+  text: string;
+  fg: { equals(v: unknown): boolean };
+  bg: { equals(v: unknown): boolean };
+};
 type CapturedLine = { spans: CapturedSpan[] };
 
 /** Collapse a captured row's spans into plain text. */

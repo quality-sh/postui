@@ -65,21 +65,22 @@ describe("steppedRequestRow", () => {
 
 describe("scroll window", () => {
   test("visibleRowCount derives from the terminal height with chrome, floored at 1", () => {
-    expect(visibleRowCount(36)).toBe(28);
-    expect(visibleRowCount(8)).toBe(1);
+    // header (3) + status bar (1) + the pane's frame (2)
+    expect(visibleRowCount(36)).toBe(30);
+    expect(visibleRowCount(7)).toBe(1);
     expect(visibleRowCount(3)).toBe(1);
   });
 
-  test("windowForCursor scrolls down only when the selection box overflows", () => {
-    // rows: header(1) + request(3) + header(1) + request(3) => height 8
+  test("windowForCursor scrolls down only when the selected row overflows", () => {
+    // rows: header(1) + request(1) + header(1) + request(1) => height 4
     const rows = flattenRows(items, groups, null);
-    const visible = 5;
+    const visible = 2;
     // Cursor on the first request (offset 1): no scroll needed.
     expect(windowForCursor(rows, 1, visible, 0)).toBe(0);
-    // Cursor on the second request (offset 5): box 5..7 needs start 3.
-    expect(windowForCursor(rows, 3, visible, 0)).toBe(3);
-    // Scrolling back up: the box top becomes the window start (offset 1).
-    expect(windowForCursor(rows, 1, visible, 3)).toBe(1);
+    // Cursor on the second request (offset 3): rows 2..3 need start 2.
+    expect(windowForCursor(rows, 3, visible, 0)).toBe(2);
+    // Scrolling back up: the row becomes the window start (offset 1).
+    expect(windowForCursor(rows, 1, visible, 2)).toBe(1);
   });
 
   test("windowForCursor clamps to the layout and ignores unknown rows", () => {

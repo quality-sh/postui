@@ -1,15 +1,17 @@
 /**
  * The collections pane's scroll window, as pure arithmetic over the pane's
  * flattened row layout: which terminal row a cursor sits at, and the window
- * start that keeps a 3-row request box fully visible. No renderable touches
- * — everything here is trivially testable.
+ * start that keeps a request row fully visible. No renderable touches —
+ * everything here is trivially testable.
  */
 
 import { REQUEST_ROW_HEIGHT } from "./collections-render.ts";
 import type { FlatRow } from "./collections-rows.ts";
+import { HEADER_ROWS } from "./header.ts";
+import { STATUS_BAR_ROWS } from "./status-bar.ts";
 
-/** Terminal rows above and around the pane body: header (3) + status (3) + pane border (2). */
-const CHROME_ROWS = 8;
+/** Terminal rows above and around the pane body: header + status bar + the pane's own frame (2). */
+const CHROME_ROWS = HEADER_ROWS + STATUS_BAR_ROWS + 2;
 
 /** How many flattened body rows fit under the chrome at this terminal height. */
 export function visibleRowCount(terminalHeight: number): number {

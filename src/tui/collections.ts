@@ -11,7 +11,7 @@ import {
   treeBranch,
 } from "./collections-render.ts";
 import { groupByCollection } from "./collection-groups.ts";
-import { blendHex, sweepBorder } from "./motion.ts";
+import { blendHex, sweepFill } from "./motion.ts";
 import type { ParsedKeyLike } from "./keymap.ts";
 import { flattenRows, steppedRequestRow } from "./collections-rows.ts";
 import type { FlatRow } from "./collections-rows.ts";
@@ -119,10 +119,11 @@ export function startCollectionsPane(
     width: 30,
     height: "100%",
     border: true,
+    borderStyle: "rounded",
     borderColor: THEME.color.border,
     title: "COLLECTIONS",
-    titleColor: THEME.color.bright,
-    backgroundColor: THEME.color.bg,
+    titleColor: THEME.color.text,
+    backgroundColor: THEME.color.panel,
   });
 
   const state = {
@@ -227,21 +228,21 @@ export function startCollectionsPane(
   };
 
   /**
-   * The selection bar's arrival feedback: a short border sweep into the
-   * accent color on the row the cursor just landed on (motion confirms the
-   * move; the render itself already painted the end state, so without the
-   * motion engine this is a no-op re-assert).
+   * The selection bar's arrival feedback: the row the cursor just landed on
+   * lights up a step toward the accent and settles back to its accent-soft
+   * fill (motion confirms the move; the render itself already painted the
+   * end state, so without the motion engine this is a no-op re-assert).
    */
   const pulseHighlighted = (): void => {
     if (highlightedRow === null) return;
-    sweepBorder(
+    sweepFill(
       highlightedRow,
-      blendHex(THEME.color.accent, THEME.color.border, 0.55),
-      THEME.color.accent,
+      blendHex(THEME.color.accentSoft, THEME.color.accent, 0.35),
+      THEME.color.accentSoft,
     );
   };
 
-  /** Keep the highlighted request's selection box fully inside the window. */
+  /** Keep the highlighted request's row fully inside the window. */
   const ensureVisible = (): void => {
     if (state.cursor === null) return;
     const rows = flatRows();

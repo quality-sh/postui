@@ -32,32 +32,34 @@ describe("visual polish", () => {
     }
   });
 
-  test("every pane's empty state speaks the shared style: text for the lack, dim for the hint", async () => {
+  test("every pane's empty state speaks the shared style: muted for the lack, dim for the hint", async () => {
     const app = await setupApp();
-    const text = RGBA.fromHex(THEME.color.text);
+    const muted = RGBA.fromHex(THEME.color.muted);
     const dim = RGBA.fromHex(THEME.color.dim);
     const spans = flatSpans(app);
 
-    // collections: the lack in text, the fix-it command bright
+    // collections: the lack muted, the fix-it command in the body text
     const lack = spans.find(span => span.text.includes("no saved requests found"));
-    expect(lack?.fg.equals(text)).toBe(true);
+    expect(lack?.fg.equals(muted)).toBe(true);
+    const command = spans.find(span => span.text.includes("postui save"));
+    expect(command?.fg.equals(RGBA.fromHex(THEME.color.text))).toBe(true);
 
     // composer: same structure (main line + dim way out)
     const composerEmpty = spans.find(span => span.text.includes("no request loaded"));
-    expect(composerEmpty?.fg.equals(text)).toBe(true);
+    expect(composerEmpty?.fg.equals(muted)).toBe(true);
     const composerHint = spans.find(span => span.text.includes("select one in collections"));
     expect(composerHint?.fg.equals(dim)).toBe(true);
 
     // response idle: same structure again
     const responseEmpty = spans.find(span => span.text.includes("no response yet"));
-    expect(responseEmpty?.fg.equals(text)).toBe(true);
+    expect(responseEmpty?.fg.equals(muted)).toBe(true);
     const responseHint = spans.find(span =>
       span.text.includes("select a request in collections and press ⏎"),
     );
     expect(responseHint?.fg.equals(dim)).toBe(true);
   });
 
-  test("the response tests-tab empty state marks the way out in bright", async () => {
+  test("the response tests-tab empty state marks the way out in the body text", async () => {
     const app = await setupApp({ "one.ts": mod("GET", "https://api.dev/one") });
     await openFirstRequest(app);
     await focusComposer(app);
@@ -68,17 +70,17 @@ describe("visual polish", () => {
     await app.flush();
     await app.shell.response.settled();
     await app.renderOnce();
-    const bright = RGBA.fromHex(THEME.color.bright);
+    const text = RGBA.fromHex(THEME.color.text);
     const gen = flatSpans(app).find(span => span.text.includes("run postui gen"));
-    expect(gen?.fg.equals(bright)).toBe(true);
+    expect(gen?.fg.equals(text)).toBe(true);
   });
 
-  test("a failed workspace read renders its named error with the accent ✗ marker", async () => {
+  test("a failed workspace read renders its named error with the love ✗ marker", async () => {
     const app = await setupApp({ "broken.ts": "export const request = {" });
-    const accent = RGBA.fromHex(THEME.color.accent);
+    const love = RGBA.fromHex(THEME.color.love);
     const marker = flatSpans(app).find(span => span.text.includes("✗"));
     expect(marker).toBeDefined();
-    expect(marker?.fg.equals(accent)).toBe(true);
+    expect(marker?.fg.equals(love)).toBe(true);
     expect(frameText(app, HEIGHT)).toContain("SavedModuleError");
   });
 

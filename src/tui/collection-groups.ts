@@ -22,18 +22,6 @@ export function collectionTitle(url: string): string {
   return segment.charAt(0).toUpperCase() + segment.slice(1);
 }
 
-/**
- * Method coloring per the mockup: POST is painted in the accent red/pink,
- * GET muted. Every mutating method gets the accent treatment; safe methods
- * stay muted. Comparison is case-insensitive because hand-edited modules
- * may hold lowercase methods.
- */
-const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-
-export function isMutatingMethod(method: string): boolean {
-  return MUTATING_METHODS.has(method.toUpperCase());
-}
-
 /** Requests grouped under their collection title, groups sorted by title. */
 export interface CollectionGroup {
   readonly title: string;

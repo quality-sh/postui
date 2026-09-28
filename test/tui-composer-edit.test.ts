@@ -38,7 +38,7 @@ describe("composer editing", () => {
     await app.flush();
     app.mockInput.pressKey("DELETE"); // drops the "h" of http
     await app.flush();
-    expect(frameText(app, HEIGHT)).toContain(`│ ${server.url("/on-ex").slice(1)}`);
+    expect(frameText(app, HEIGHT)).toContain(` ${server.url("/on-ex").slice(1)}`); // the "h" is gone
     await app.mockInput.typeText("h"); // back in at the start
     app.mockInput.pressKey("END");
     await arrows(app, "left", "left", "left"); // before the "-"

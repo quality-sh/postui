@@ -103,7 +103,7 @@ describe("search palette", () => {
     await setup.flush();
     await setup.renderOnce();
     // users is ranked first, so the highlight starts on it
-    expect(rowContaining(setup, "▶")).toContain("users");
+    expect(rowContaining(setup, "▌")).toContain("users");
     setup.mockInput.pressEnter();
     await setup.flush();
     await setup.shell.collections.settled();
@@ -112,7 +112,7 @@ describe("search palette", () => {
     // and the collections highlight sits on the match
     expect(setup.shell.composer.loadedName).toBe("users");
     expect(setup.shell.searching).toBe(false);
-    expect(rowContaining(setup, "▶")).toContain("users");
+    expect(rowContaining(setup, "▌")).toContain("users");
     const text = frameText(setup, HEIGHT);
     expect(text).toContain("↑↓ select"); // status bar back to browsing
     expect(text).toContain("https://api.dev/users"); // composer loaded the URL
@@ -147,11 +147,11 @@ describe("search palette", () => {
     await setup.flush();
     await setup.renderOnce();
     expect(frameText(setup, HEIGHT)).toContain("3 matches");
-    const before = rowContaining(setup, "▶");
+    const before = rowContaining(setup, "▌");
     setup.mockInput.pressArrow("down");
     await setup.flush();
     await setup.renderOnce();
-    expect(rowContaining(setup, "▶")).not.toBe(before); // highlight moved within matches
+    expect(rowContaining(setup, "▌")).not.toBe(before); // highlight moved within matches
     // j is a letter here, not navigation: it lands in the query, which no
     // request matches anymore
     setup.mockInput.pressKey("j");
@@ -234,15 +234,15 @@ describe("search palette", () => {
       "three.ts": moduleSource("GET", "https://api.dev/mmm"),
     });
     // first listing highlights items[0] = one, displayed last under Users
-    expect(rowContaining(setup, "▶")).toContain("one");
+    expect(rowContaining(setup, "▌")).toContain("one");
     setup.mockInput.pressKey("j"); // wraps forward to the first DISPLAYED row
     await setup.flush();
     await setup.renderOnce();
-    expect(rowContaining(setup, "▶")).toContain("two");
+    expect(rowContaining(setup, "▌")).toContain("two");
     setup.mockInput.pressKey("j");
     await setup.flush();
     await setup.renderOnce();
-    expect(rowContaining(setup, "▶")).toContain("three");
+    expect(rowContaining(setup, "▌")).toContain("three");
     setup.mockInput.pressEnter(); // open what the highlight sits on
     await setup.flush();
     await setup.shell.collections.settled();

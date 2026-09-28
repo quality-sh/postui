@@ -1,22 +1,19 @@
 import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
 import type { CliRenderer } from "@opentui/core";
 import type { LoadedRequest } from "../gen/load.ts";
-import { isMutatingMethod } from "./collection-groups.ts";
 import type { FlatRow } from "./collections-rows.ts";
 import { errorName, namedErrorText, renderEmptyState } from "./render.ts";
-import { THEME } from "./theme.ts";
+import { THEME, methodColor } from "./theme.ts";
 
 /**
- * Every request row is three terminal rows tall — the selection box's
- * border plus its text — selected or not, so the layout never shifts when
- * the selection moves and the pane's window math stays one constant.
- * Unselected rows spend the extra rows on the tree guide.
+ * Every request row is one terminal row, selected or not: the selection is
+ * a bar and a fill, never a box, so the layout never shifts when the
+ * selection moves and the pane's window math stays one constant.
  */
-export const REQUEST_ROW_HEIGHT = 3;
-// Inside the selection box: pane inner width 28 - marker column (1) - box
-// borders (2) - padding (1) - method column (6) leaves 18 cells, the
-// ellipsis included.
-const MAX_NAME_CHARS = 17;
+export const REQUEST_ROW_HEIGHT = 1;
+// Pane inner width 28 - bar column (1) - guide (2) - method column (6)
+// leaves 19 cells: 18 name characters plus the ellipsis.
+const MAX_NAME_CHARS = 18;
 
 /**
  * Where a request row sits under its collection header: `middle` rows draw
@@ -45,10 +42,10 @@ export function renderCollectionsEmptyState(renderer: CliRenderer, pane: BoxRend
     renderer,
     pane,
     [
-      { text: "no saved requests found", tone: "text" },
-      { text: "in requests/", tone: "text" },
-      { text: "save one with", tone: "dim" },
-      { text: "postui save", tone: "bright" },
+      { text: "no saved requests found", tone: "message" },
+      { text: "in requests/", tone: "message" },
+      { text: "save one with", tone: "hint" },
+      { text: "postui save", tone: "command" },
     ],
     { decor: true },
   );
@@ -64,8 +61,8 @@ export function renderNoMatches(
     renderer,
     pane,
     [
-      { text: `no matches for "${query}"`, tone: "text" },
-      { text: "esc goes back to browsing", tone: "dim" },
+      { text: `no matches for "${query}"`, tone: "message" },
+      { text: "esc goes back to browsing", tone: "hint" },
     ],
     { decor: true },
   );
@@ -76,7 +73,7 @@ export function renderError(renderer: CliRenderer, pane: BoxRenderable, error: u
   pane.add(
     new TextRenderable(renderer, {
       content: new StyledText([
-        bold(fg(THEME.color.accent)("✗ ")),
+        bold(fg(THEME.color.love)("✗ ")),
         fg(THEME.color.text)(namedErrorText(errorName(error), error)),
       ]),
       wrapMode: "word",
@@ -88,29 +85,24 @@ export function renderError(renderer: CliRenderer, pane: BoxRenderable, error: u
 /** Collection header: the mockup's "▾ Users" line. */
 export function headerRow(renderer: CliRenderer, title: string): TextRenderable {
   return new TextRenderable(renderer, {
-    content: new StyledText([fg(THEME.color.dim)("▾ "), bold(fg(THEME.color.bright)(title))]),
+    content: new StyledText([fg(THEME.color.dim)("▾ "), bold(fg(THEME.color.text)(title))]),
   });
 }
 
-/** The guide glyphs of one unselected row's three terminal rows. */
-const GUIDES: Record<TreeBranch, { readonly above: string; readonly at: string; readonly below: string }> = {
-  middle: { above: "│", at: "├ ", below: "│" },
-  last: { above: "│", at: "└ ", below: " " },
-  none: { above: " ", at: "  ", below: " " },
-};
+/** The guide glyph of one row, left of its method badge. */
+const GUIDES: Record<TreeBranch, string> = { middle: "├ ", last: "└ ", none: "  " };
 
 /**
- * One request row, per the mockup: only the SELECTED row is boxed — an
- * accent border around method badge and name, with the "▶" marker outside
- * the box on its left — while every other row is drawn plain, hanging off
- * the collection's tree guide (`├` / `└`) in the box's left-border column.
- * The selected row's box is the returned renderable, so the pane's border
- * sweep lands on it. Methods keep their colors: mutating ones in the
- * accent, safe ones green.
+ * One request row, one terminal row: bar column, the collection's tree
+ * guide (`├` / `└`), method badge, name. The SELECTED row carries the
+ * accent `▌` bar in its first column over an accent-soft fill across the
+ * pane; every other row leaves that column blank on the pane's own panel.
+ * Badges take their method's color (theme.ts methodColor).
  *
  * With `onSelect`, a left click anywhere on the row selects it (the event
- * bubbles from the row's text up to this box, so the whole 3-row strip is
- * the click target) — the same highlight move j/k performs, nothing more.
+ * bubbles from the row's text up to this box) — the same highlight move
+ * j/k performs, nothing more. The selected row's box is the returned
+ * renderable, so the pane can pulse its fill.
  */
 export function requestRow(
   renderer: CliRenderer,
@@ -119,14 +111,10 @@ export function requestRow(
   onSelect?: (request: LoadedRequest) => void,
   branch: TreeBranch = "middle",
 ): BoxRenderable {
-  // One column in from the pane edge: the marker column, left of the box.
-  // (OpenTUI turns the border on whenever a border color is given, so the
-  // color goes to the selected row only.)
   const row = new BoxRenderable(renderer, {
     height: REQUEST_ROW_HEIGHT,
-    marginLeft: 1,
-    backgroundColor: THEME.color.bg,
-    ...(selected ? { border: true, borderColor: THEME.color.accent } : {}),
+    width: "100%",
+    ...(selected ? { backgroundColor: THEME.color.accentSoft } : {}),
   });
   if (onSelect !== undefined) {
     row.onMouseDown = (event) => {
@@ -135,38 +123,32 @@ export function requestRow(
     };
   }
   const method = request.request.method.toUpperCase();
-  const label = [
-    bold(fg(isMutatingMethod(method) ? THEME.color.accent : THEME.color.safe)(method.padEnd(6))),
-    fg(selected ? THEME.color.bright : THEME.color.text)(displayName(request.name)),
-  ];
-  if (selected) {
-    // The leading space lines the badge up with the unselected rows' badges.
-    row.add(new TextRenderable(renderer, { content: new StyledText([fg(THEME.color.bg)(" "), ...label]) }));
-    // The marker sits in the margin column, on the text row: positioned
-    // out of the box (the pane does not clip overflow).
-    row.add(
-      new TextRenderable(renderer, {
-        content: new StyledText([bold(fg(THEME.color.accent)("▶"))]),
-        position: "absolute",
-        left: -2,
-        top: 0,
-      }),
-    );
-    return row;
-  }
-  // The guide runs through all three rows: in from above, the branch at the
-  // label, and on down to the next sibling unless this row closes the group.
-  const guide = GUIDES[branch];
+  const name = displayName(request.name);
   row.add(
     new TextRenderable(renderer, {
       content: new StyledText([
-        fg(THEME.color.border)(`${guide.above}\n${guide.at}`),
-        ...label,
-        fg(THEME.color.border)(`\n${guide.below}`),
+        selected ? bold(fg(THEME.color.accent)("▌")) : fg(THEME.color.border)(" "),
+        fg(THEME.color.border)(GUIDES[branch]),
+        bold(fg(methodColor(method))(methodBadge(method).padEnd(BADGE_WIDTH))),
+        selected ? bold(fg(THEME.color.text)(name)) : fg(THEME.color.text)(name),
       ]),
+      wrapMode: "none",
     }),
   );
   return row;
+}
+
+/** The method column: the longest badge (PATCH) plus one space. */
+const BADGE_WIDTH = 6;
+
+/**
+ * The badge text: DELETE and OPTIONS shorten the way Postman's sidebar
+ * does (DEL, OPT), so every badge leaves a space before the name.
+ */
+export function methodBadge(method: string): string {
+  if (method === "DELETE") return "DEL";
+  if (method === "OPTIONS") return "OPT";
+  return method;
 }
 
 /** Module names longer than the pane clip with an ellipsis; the composer shows the full module. */

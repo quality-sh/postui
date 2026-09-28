@@ -101,10 +101,12 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
     flexGrow: 1,
     width: "100%",
     border: true,
+    borderStyle: "rounded",
     borderColor: THEME.color.border,
     title: "RESPONSE",
-    titleColor: THEME.color.bright,
-    backgroundColor: THEME.color.bg,
+    titleColor: THEME.color.text,
+    backgroundColor: THEME.color.panel,
+    paddingX: 1,
   });
 
   const state = {
@@ -279,9 +281,9 @@ function scrollContent(renderer: CliRenderer, pane: BoxRenderable): ScrollBoxRen
     width: "100%",
     scrollY: true,
     scrollX: false,
-    backgroundColor: THEME.color.bg,
+    backgroundColor: THEME.color.panel,
     verticalScrollbarOptions: {
-      trackOptions: { foregroundColor: THEME.color.dim, backgroundColor: THEME.color.bg },
+      trackOptions: { foregroundColor: THEME.color.dim, backgroundColor: THEME.color.panel },
     },
   });
   for (const child of pane.getChildren().slice(FIXED_ROWS)) {
