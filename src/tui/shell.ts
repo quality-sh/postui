@@ -39,6 +39,9 @@ export interface ShellOptions {
   readonly isEditingText?: () => boolean;
 }
 
+/** How the shell ended: the user quit, or the terminal/a signal closed it. */
+type ShellEnd = "quit" | "closed";
+
 /** A started shell attached to a renderer. */
 export interface Shell {
   /** App-level pane focus; the shell keeps its border state in sync. */
@@ -51,8 +54,8 @@ export interface Shell {
   readonly response: ResponsePane;
   /** True while the `/` search palette owns the keys. */
   readonly searching: boolean;
-  /** Resolves once a quit key was pressed. */
-  readonly onQuit: Promise<"quit">;
+  /** Resolves once a quit key was pressed, or the renderer was destroyed under the shell. */
+  readonly onQuit: Promise<ShellEnd>;
   /** Detach the shell's key listener (renderer.destroy() handles the rest). */
   dispose(): void;
 }
@@ -312,8 +315,11 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   repaintFocus();
 
   let requestQuit: (() => void) | null = null;
-  const onQuit = new Promise<"quit">((resolve) => {
+  const onQuit = new Promise<ShellEnd>((resolve) => {
     requestQuit = () => resolve("quit");
+    // OpenTUI's signal handler (SIGHUP when the terminal closes, SIGTERM)
+    // destroys the renderer and leaves exiting to the app.
+    renderer.once("destroy", () => resolve("closed"));
   });
 
   /**

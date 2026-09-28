@@ -24,6 +24,14 @@ async function setupShell() {
 }
 
 describe("postui tui shell", () => {
+  test("a renderer destroyed from outside (SIGHUP, SIGTERM) ends the shell as closed", async () => {
+    // OpenTUI's own signal handler destroys the renderer but never exits;
+    // without this the process outlives its terminal and spins on dead stdin.
+    const setup = await setupShell();
+    setup.renderer.destroy();
+    expect(await setup.shell.onQuit).toBe("closed");
+  });
+
   test("renders the header: wordmark, workspace name, env badge", async () => {
     const setup = await setupShell();
     await setup.renderOnce();

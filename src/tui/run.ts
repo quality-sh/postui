@@ -19,7 +19,9 @@ export interface TuiOptions {
  * createCliRenderer() takes the terminal into the alternate screen;
  * destroy() (in finally, so every exit path restores) leaves it again,
  * resets the background color and the cursor. Quit resolves with exit
- * status 0; renderer startup failures surface as thrown errors.
+ * status 0; a renderer destroyed by OpenTUI's signal handler (SIGHUP when
+ * the terminal closes, SIGTERM) resolves with 1 instead of hanging on;
+ * renderer startup failures surface as thrown errors.
  * attachMotion() drives the border-sweep transitions from the renderer's
  * frame loop; detachMotion() (also in finally) lands any in-flight sweep
  * before teardown.
@@ -41,8 +43,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
     throw e;
   }
   try {
-    await shell.onQuit;
-    return 0;
+    // A closed terminal or a signal is not a clean quit: exit 1.
+    return (await shell.onQuit) === "quit" ? 0 : 1;
   } finally {
     shell.dispose();
     detachMotion();
