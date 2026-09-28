@@ -102,3 +102,18 @@ describe("collections scroll window", () => {
     expect(rowContaining(app, "▌")).toContain("req40");
   });
 });
+
+describe("initial highlight", () => {
+  test("the cursor starts on the first DISPLAYED request, not the first file by name", async () => {
+    // File order: 7, missing, slow. Displayed order groups by path: Missing, Slow, Users.
+    const app = await setupApp({
+      "7.ts": moduleSource("GET", "https://api.dev/users/7"),
+      "missing.ts": moduleSource("GET", "https://api.dev/missing"),
+      "slow.ts": moduleSource("GET", "https://api.dev/slow"),
+    });
+    await app.shell.collections.ready;
+    await app.renderOnce();
+    expect(rowContaining(app, "▌")).toContain("missing");
+    expect(frameText(app, HEIGHT)).toContain("▾ Missing");
+  });
+});

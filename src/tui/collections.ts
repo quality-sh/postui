@@ -109,6 +109,10 @@ export function startCollectionsPane(
 
   const visibleRows = (): number => visibleRowCount(renderer.height);
 
+  /** The first request as DISPLAYED (grouped order differs from file order), or null. */
+  const firstShownCursor = (): number | null =>
+    flatRows().find((row): row is Extract<FlatRow, { kind: "request" }> => row.kind === "request")?.index ?? null;
+
   /** The request the highlight sits on, in whichever list is shown. */
   const highlighted = (): LoadedRequest | undefined =>
     state.cursor === null ? undefined : shown()[state.cursor];
@@ -198,7 +202,7 @@ export function startCollectionsPane(
     state.groups = groupByCollection(scan.requests);
     const kept = previousName === null ? -1 : shown().findIndex(item => item.name === previousName);
     state.cursor = kept >= 0 ? kept : null;
-    if (state.cursor === null && state.items.length > 0 && state.previousCount === 0) state.cursor = 0;
+    if (state.cursor === null && state.items.length > 0 && state.previousCount === 0) state.cursor = firstShownCursor();
     state.previousCount = state.items.length;
     reconcileSelection(new Set(scan.changed));
     ensureVisible();
@@ -308,7 +312,7 @@ export function startCollectionsPane(
     state.filterQuery = "";
     state.savedCursorName = cursorName();
     state.matchCount = 0;
-    state.cursor = state.items.length > 0 ? 0 : null;
+    state.cursor = firstShownCursor();
     state.firstVisible = 0;
     render("moved");
   };
