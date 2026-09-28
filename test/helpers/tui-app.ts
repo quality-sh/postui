@@ -2,6 +2,7 @@ import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testin
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { instantClock, setFxClock } from "../../src/tui/fx/clock.ts";
 import { COMPOSER_PANE_ID, RESPONSE_PANE_ID, startShell } from "../../src/tui/shell.ts";
 
 const WIDTH = 100;
@@ -26,12 +27,16 @@ export interface AppSetup extends TestRendererSetup {
 
 const dirs: string[] = [];
 const setups: AppSetup[] = [];
+let restoreClock: (() => void) | null = null;
 
 /** A full app on a temp workspace: shell with composer + response wired. */
 export async function setupApp(
   files: Record<string, string> = {},
   testFiles: Record<string, string> = {},
 ): Promise<AppSetup> {
+  // Effects land their end state at once: frames are asserted, not watched.
+  // A test that wants to see motion swaps in a manualClock itself.
+  restoreClock ??= setFxClock(instantClock());
   const dir = await mkdtemp(join(tmpdir(), "postui-tui-app-"));
   dirs.push(dir);
   const requestsDir = join(dir, "requests");
@@ -113,6 +118,8 @@ export async function teardownApps(): Promise<void> {
     setup.renderer.destroy();
   }
   setups.length = 0;
+  restoreClock?.();
+  restoreClock = null;
   await Promise.all(dirs.map(dir => rm(dir, { recursive: true, force: true })));
   dirs.length = 0;
 }

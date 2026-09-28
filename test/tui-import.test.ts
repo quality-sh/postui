@@ -147,8 +147,7 @@ describe("import prompt", () => {
     expect(text).toContain("http://127.0.0.1:8984/users"); // composer loaded the URL
     expect(text).toContain("saved users");
     expect(text).toContain("Authorization header not saved");
-    // The acknowledgement toast: it develops in (~180 ms), then holds.
-    await Bun.sleep(250);
+    // The acknowledgement toast (the instant fx clock lands its reveal at once).
     await app.renderOnce();
     expect(rowContaining(app, "imported users")).not.toBeNull();
   });
