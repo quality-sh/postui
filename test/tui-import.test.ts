@@ -142,11 +142,15 @@ describe("import prompt", () => {
 
     expect(app.shell.focus.focused).toBe(COLLECTIONS_PANE_ID);
     expect(app.shell.composer.loadedName).toBe("users");
-    expect(rowContaining(app, "▌")).toContain("users"); // highlighted in the tree
+    expect(rowContaining(app, "POST  users")).toContain("▌"); // highlighted in the tree
     const text = frameText(app, HEIGHT);
     expect(text).toContain("http://127.0.0.1:8984/users"); // composer loaded the URL
     expect(text).toContain("saved users");
     expect(text).toContain("Authorization header not saved");
+    // The acknowledgement toast: it develops in (~180 ms), then holds.
+    await Bun.sleep(250);
+    await app.renderOnce();
+    expect(rowContaining(app, "imported users")).not.toBeNull();
   });
 
   test("a custom name wins over the derived one", async () => {

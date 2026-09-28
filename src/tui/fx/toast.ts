@@ -11,7 +11,7 @@ import { FX } from "./palette.ts";
  * 1.8 s on the fx clock.
  */
 
-type ToastVariant = "success" | "error" | "info";
+export type ToastVariant = "success" | "error" | "info";
 
 const HIDE_MS = 1800;
 const REVEAL_MS = 180;
@@ -61,13 +61,13 @@ function fit(text: string, max: number): string {
 export function mountToasts(
   renderer: RenderContext,
   root: Renderable,
-  opts: { readonly clock?: FxClock } = {},
+  opts: { readonly clock?: FxClock; readonly top?: number } = {},
 ): Toaster {
   const clock = opts.clock ?? fxClock();
   const stack = new BoxRenderable(renderer, {
     id: "fx-toasts",
     position: "absolute",
-    top: 1,
+    top: opts.top ?? 1,
     right: 2,
     zIndex: 100,
     flexDirection: "column",

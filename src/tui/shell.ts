@@ -11,7 +11,9 @@ import { FocusRegistry } from "./focus.ts";
 import { attachImportPrompt } from "./import.ts";
 import { globalAction, hintsFor } from "./keymap.ts";
 import type { GlobalAction, ParsedKeyLike } from "./keymap.ts";
-import { buildHeader } from "./header.ts";
+import { bindToaster } from "./fx/notify.ts";
+import { mountToasts } from "./fx/toast.ts";
+import { buildHeader, HEADER_ROWS } from "./header.ts";
 import { settleBorder, sweepBorder, sweepFill } from "./motion.ts";
 import { startStatusBar } from "./status-bar.ts";
 import type { SearchBarState, StatusBar, StatusBarMode } from "./status-bar.ts";
@@ -364,6 +366,11 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   renderer.keyInput.on("paste", pasteListener);
   repaintStatusBar();
 
+  // Mounted last so the stack draws above every pane and the import overlay;
+  // it hangs from the header's bottom edge, over the panes' top-right corner.
+  const toasts = mountToasts(renderer, root, { top: HEADER_ROWS + 1 });
+  bindToaster(toasts);
+
   return {
     focus,
     collections,
@@ -377,6 +384,8 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     dispose: () => {
       renderer.keyInput.off("keypress", keyListener);
       renderer.keyInput.off("paste", pasteListener);
+      bindToaster(null);
+      toasts.destroy();
     },
   };
 }

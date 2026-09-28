@@ -12,6 +12,7 @@ import type { ComposerPane } from "./composer.ts";
 import { importOverlay, renderImportPrompt } from "./import-render.ts";
 import type { ImportField } from "./import-render.ts";
 import { globalAction } from "./keymap.ts";
+import { notify } from "./fx/notify.ts";
 import type { ParsedKeyLike } from "./keymap.ts";
 import { errorLine } from "./render.ts";
 
@@ -302,6 +303,7 @@ async function revealImported(targets: RevealTargets, result: SaveResult): Promi
     await targets.collections.settled();
   }
   targets.showNote(importNote(result));
+  notify(`imported ${result.name}`, "success");
 }
 
 /**
