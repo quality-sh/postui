@@ -1,25 +1,25 @@
 import { BoxRenderable } from "@opentui/core";
 import type { CliRenderer } from "@opentui/core";
 import type { LoadedRequest } from "../gen/load.ts";
-import {
-  REQUEST_ROW_HEIGHT,
-  headerRow,
-  renderCollectionsEmptyState,
-  renderError,
-  renderNoMatches,
-  requestRow,
-  treeBranch,
-} from "./collections-render.ts";
+import type { CollectionsPane, CollectionsPaneOptions } from "./collections-api.ts";
+import { renderCollectionsEmptyState, renderError, renderNoMatches, treeBranch } from "./collections-render.ts";
 import { groupByCollection } from "./collection-groups.ts";
-import { blendHex, sweepFill } from "./motion.ts";
 import type { ParsedKeyLike } from "./keymap.ts";
 import { flattenRows, steppedRequestRow } from "./collections-rows.ts";
 import type { FlatRow } from "./collections-rows.ts";
-import { visibleRowCount, windowForCursor } from "./collections-window.ts";
-import { clearChildren, DECOR_SIZE, halftoneTail } from "./render.ts";
+import type { SlotLook } from "./collections-slot.ts";
+import { createRowsView } from "./collections-view.ts";
+import type { DevelopPlan } from "./collections-view.ts";
+import { watchFolder } from "./collections-watch.ts";
+import { clampWindow, visibleRowCount, windowForCursor, windowSlots } from "./collections-window.ts";
+import type { WindowSlot } from "./collections-window.ts";
+import { DECOR_SIZE } from "./render.ts";
 import { rankRequests } from "./search.ts";
 import { THEME } from "./theme.ts";
-import { readWorkspace } from "./workspace.ts";
+import { workspaceReader } from "./workspace.ts";
+import type { WorkspaceScan } from "./workspace.ts";
+
+export type { CollectionsPane, CollectionsPaneOptions } from "./collections-api.ts";
 
 /** The pane id used in the shell's focus registry (tab order). */
 export const COLLECTIONS_PANE_ID = "collections";
@@ -27,89 +27,20 @@ export const COLLECTIONS_PANE_ID = "collections";
 /** Cursor keys: ↑/↓, with j/k as silent aliases. */
 const CURSOR_KEYS: Readonly<Record<string, 1 | -1>> = { down: 1, j: 1, up: -1, k: -1 };
 
-export interface CollectionsPaneOptions {
-  /** The workspace's requests folder; re-read on every focus regain. */
-  readonly requestsDir: string;
-  /** Opening a request hands it to the shell (the composer loads it). */
-  readonly onOpen: (request: LoadedRequest) => void;
-  /**
-   * The open selection's module vanished from disk (refresh noticed); the
-   * shell clears the composer — the module was its source of truth.
-   */
-  readonly onSelectionLost?: () => void;
-  /**
-   * The open selection survived a refresh and was re-read from disk; the
-   * shell decides whether the composer reloads it (an edited draft wins —
-   * edits are in-memory and must not be clobbered behind the user's back).
-   */
-  readonly onReload?: (request: LoadedRequest) => void;
-  /**
-   * Send the composer's current draft through the pipeline; returns whether
-   * a send started. Enter in the tree calls it right after opening the
-   * highlighted request — or alone when that request is already open, so an
-   * edited draft is sent as edited, never reloaded.
-   */
-  readonly onSend?: () => boolean;
-  /**
-   * The user directly manipulated the pane with the mouse (clicked a
-   * request row); the shell focuses it. Called after the selection moved —
-   * the row re-render removes the clicked row from the tree, so the pane's
-   * own mouse handler can not rely on the event bubbling to it.
-   */
-  readonly onInteract?: () => void;
-}
-
-/** The collections pane controller the shell drives: keys, focus, opening, search filter. */
-export interface CollectionsPane {
-  readonly pane: BoxRenderable;
-  /** Resolves once the initial workspace load has been rendered. */
-  readonly ready: Promise<void>;
-  /** Resolves when every refresh started so far has finished. */
-  settled(): Promise<void>;
-  /** Handle a keypress while the pane is focused; true = consumed. */
-  handleKey(key: ParsedKeyLike): boolean;
-  /**
-   * Open the highlighted request in the composer WITHOUT sending it (the
-   * search palette's "⏎ open"). A request that is already open is left
-   * alone, so its draft keeps any edits. Resolves once the open has landed.
-   */
-  openHighlighted(): Promise<void>;
-  /**
-   * Highlight a specific request (mouse click-to-select): the cursor moves
-   * to it in the current list's index space, exactly where ↑/↓ would land.
-   */
-  selectRequest(name: string): void;
-  /** Called by the shell after every focus change; refreshes on regaining focus. */
-  syncFocus(focusedPane: string | null): void;
-  /**
-   * Search-filter mode (the shell's `/` palette): the pane shows the query's
-   * matches ranked best first, as a flat list. Purely in-memory over the
-   * loaded workspace — no file reads, no store.
-   */
-  beginFilter(): void;
-  /** Replace the filter query; the highlight returns to the top match. */
-  setFilterQuery(query: string): void;
-  /** Leave filter mode; the grouped list returns with the pre-search highlight. */
-  endFilter(): void;
-  /**
-   * Navigation keys inside filter mode (up/down move the match highlight,
-   * enter opens it without sending); true = consumed.
-   */
-  filterKey(key: ParsedKeyLike): boolean;
-  /** True while the search filter is active. */
-  readonly filtering: boolean;
-  /** Matches for the current query (null when not filtering). */
-  readonly filteredCount: number | null;
-}
+/** A scan's verdict for the render: what develops in, or "same" (nothing to paint). */
+type Applied = DevelopPlan | "same";
 
 /**
  * The collections pane: every saved request grouped by collection, ↑/↓
  * navigation with wrap-around (j/k as silent aliases), enter to open the
  * request in the composer and send it in one step — focus stays here, so
  * ↓ ⏎ ↓ ⏎ walks the list firing each request.
- * All data comes from readWorkspace() (the shared loader); a refresh on
- * every focus regain makes hand edits and deletions appear without a
- * restart, and a vanished selection clears honestly instead of jumping.
+ *
+ * Data comes from a WorkspaceReader (workspace.ts): the first scan imports
+ * everything; later scans — on a folder change (fs.watch, debounced) or a
+ * focus regain — stat the files and import only what changed. Opens and
+ * sends use the in-memory list at once; they never wait on a scan. A
+ * vanished selection clears honestly instead of jumping.
  */
 export function startCollectionsPane(
   renderer: CliRenderer,
@@ -125,8 +56,11 @@ export function startCollectionsPane(
     titleColor: THEME.color.text,
     backgroundColor: THEME.color.panel,
   });
+  const reader = options.workspace ?? workspaceReader(options.requestsDir);
 
   const state = {
+    /** False until the first scan lands: the skeleton holds until then. */
+    loaded: false,
     groups: [] as ReturnType<typeof groupByCollection>,
     items: [] as LoadedRequest[],
     /** Highlighted request (moves with ↑/↓), as an index into the shown list. */
@@ -135,12 +69,9 @@ export function startCollectionsPane(
     selectedName: null as string | null,
     loadError: null as unknown,
     focused: true, // the shell's first pane starts focused
-    firstVisible: 0, // scroll window start, in flattened terminal rows
+    firstVisible: 0, // scroll window start, as a flattened row index
     previousCount: 0,
-    /**
-     * Search-filter mode: non-null holds the query, and the pane shows its
-     * ranked matches (flat list) instead of the grouped tree.
-     */
+    /** Search-filter mode: non-null holds the query, and the pane shows its ranked matches. */
     filterQuery: null as string | null,
     /** Highlight to restore when the filter closes, tracked by module name. */
     savedCursorName: null as string | null,
@@ -149,10 +80,8 @@ export function startCollectionsPane(
   };
 
   let tail: Promise<void> = Promise.resolve();
-  // Serialize workspace reads. The chained promise is returned so callers
-  // can await exactly the work they enqueued. A step may enqueue a follow-up
-  // step but must never await it: the follow-up chains onto the tail this
-  // step is occupying.
+  // Serialize scans: each applies to the state the previous one left. A
+  // step must never await a step it enqueues (it would wait on itself).
   const enqueue = (step: () => Promise<void>): Promise<void> => {
     const done = tail.then(step, step);
     tail = done;
@@ -161,10 +90,8 @@ export function startCollectionsPane(
 
   /**
    * The list the pane currently shows: the full workspace, or the query's
-   * ranked matches. Ranking is in-memory only (rule_docs_no_store spirit:
-   * search never touches the filesystem), memoized per (query, items) so a
-   * refresh landing mid-search re-filters against fresh items while every
-   * other call in the same render pass reuses one ranking.
+   * ranked matches — in-memory only, memoized per (query, items) so one
+   * render pass ranks once and a scan landing mid-search re-ranks fresh items.
    */
   let ranked: { query: string; items: LoadedRequest[]; matches: LoadedRequest[] } | null = null;
   const shown = (): LoadedRequest[] => {
@@ -178,189 +105,175 @@ export function startCollectionsPane(
 
   /** The rows the pane currently shows: the grouped tree, or the flat match list. */
   const flatRows = (): FlatRow[] =>
-    flattenRows(
-      state.items,
-      state.groups,
-      state.filterQuery === null ? null : shown(),
-    );
+    flattenRows(state.items, state.groups, state.filterQuery === null ? null : shown());
 
   const visibleRows = (): number => visibleRowCount(renderer.height);
 
-  /** The rendered selection bar (this pass), for the move feedback sweep. */
-  let highlightedRow: BoxRenderable | null = null;
+  /** The request the highlight sits on, in whichever list is shown. */
+  const highlighted = (): LoadedRequest | undefined =>
+    state.cursor === null ? undefined : shown()[state.cursor];
+  const cursorName = (): string | null => highlighted()?.name ?? null;
 
-  const render = (): void => {
-    clearChildren(pane);
-    highlightedRow = null;
-    if (state.loadError !== null) {
-      renderError(renderer, pane, state.loadError);
-      return;
+  const view = createRowsView(renderer, pane, name => selectRequest(name));
+
+  const lookOf = (rows: readonly FlatRow[], slot: WindowSlot): SlotLook =>
+    slot.row.kind === "header"
+      ? { kind: "header", title: slot.row.title }
+      : {
+          kind: "request",
+          request: slot.row.request,
+          branch: treeBranch(rows, slot.rowIndex),
+          selected: slot.row.index === state.cursor,
+        };
+
+  /** Paint the pane from state. Rows repaint in place; `develop` names what develops in. */
+  const render = (develop: DevelopPlan = null): void => {
+    if (!state.loaded) return; // the skeleton holds until the first scan lands
+    const query = state.filterQuery;
+    if (state.loadError !== null) view.message(box => renderError(renderer, box, state.loadError));
+    else if (state.items.length === 0) view.message(box => renderCollectionsEmptyState(renderer, box));
+    else if (query !== null && shown().length === 0) view.message(box => renderNoMatches(renderer, box, query));
+    else {
+      const rows = flatRows();
+      const visible = visibleRows();
+      state.firstVisible = clampWindow(rows, state.firstVisible, visible);
+      const slots = windowSlots(rows, state.firstVisible, visible);
+      // Room left under a short list gets the mockup's halftone dots — only when they fit.
+      const tailFits = slots.length + DECOR_SIZE.height <= visible;
+      view.rows(slots.map(slot => lookOf(rows, slot)), { develop, tail: tailFits });
     }
-    if (state.items.length === 0) {
-      renderCollectionsEmptyState(renderer, pane);
-      return;
-    }
-    if (state.filterQuery !== null && shown().length === 0) {
-      renderNoMatches(renderer, pane, state.filterQuery);
-      return;
-    }
-    const rows = flatRows();
-    const windowEnd = state.firstVisible + visibleRows();
-    let top = 0; // terminal row where the current entry starts
-    for (const [rowIndex, row] of rows.entries()) {
-      const height = row.kind === "header" ? 1 : REQUEST_ROW_HEIGHT;
-      // Only fully visible entries render: the pane does not clip overflow.
-      if (top >= state.firstVisible && top + height <= windowEnd) {
-        if (row.kind === "header") pane.add(headerRow(renderer, row.title));
-        else {
-          const selected = row.index === state.cursor;
-          const onSelect = (request: LoadedRequest): void => selectRequest(request.name);
-          const rowBox = requestRow(renderer, row.request, selected, onSelect, treeBranch(rows, rowIndex));
-          if (selected) highlightedRow = rowBox;
-          pane.add(rowBox);
-        }
-      }
-      top += height;
-    }
-    // Room left under a short list gets the mockup's halftone dots — but
-    // only when the decoration itself fits, so nothing ever overflows.
-    if (top + DECOR_SIZE.height <= visibleRows()) pane.add(halftoneTail(renderer));
   };
 
-  /**
-   * The selection bar's arrival feedback: the row the cursor just landed on
-   * lights up a step toward the accent and settles back to its accent-soft
-   * fill (motion confirms the move; the render itself already painted the
-   * end state, so without the motion engine this is a no-op re-assert).
-   */
-  const pulseHighlighted = (): void => {
-    if (highlightedRow === null) return;
-    sweepFill(
-      highlightedRow,
-      blendHex(THEME.color.accentSoft, THEME.color.accent, 0.35),
-      THEME.color.accentSoft,
-    );
-  };
-
-  /** Keep the highlighted request's row fully inside the window. */
+  /** Keep the highlighted request's row inside the window. */
   const ensureVisible = (): void => {
     if (state.cursor === null) return;
     const rows = flatRows();
     const rowIndex = rows.findIndex(row => row.kind === "request" && row.index === state.cursor);
-    if (rowIndex === -1) return;
-    state.firstVisible = windowForCursor(rows, rowIndex, visibleRows(), state.firstVisible);
+    if (rowIndex !== -1) state.firstVisible = windowForCursor(rows, rowIndex, visibleRows(), state.firstVisible);
+  };
+
+  /** Move the highlight to a shown-list index and pulse its row (the move's acknowledgement). */
+  const placeCursor = (index: number): void => {
+    state.cursor = index;
+    ensureVisible();
+    render();
+    const name = cursorName();
+    if (name !== null) view.flash(name, "move");
   };
 
   /** ↑/↓: the cursor walks the pane's DISPLAYED request order, with wrap-around. */
   const moveCursor = (delta: 1 | -1): void => {
     const row = steppedRequestRow(flatRows(), state.cursor, delta);
-    if (row !== null) state.cursor = row.index;
-    ensureVisible();
-    render();
-    pulseHighlighted();
+    if (row !== null) placeCursor(row.index);
   };
 
   /** Mouse click-to-select: the cursor lands on the clicked row, wherever ↑/↓ would have put it. */
   const selectRequest = (name: string): void => {
     const index = shown().findIndex(item => item.name === name);
     if (index === -1) return;
-    if (index !== state.cursor) {
-      state.cursor = index;
-      ensureVisible();
-      render();
-      pulseHighlighted();
-    }
+    if (index !== state.cursor) placeCursor(index);
     options.onInteract?.();
   };
 
-  /**
-   * Hand the named request to the composer, then (with `send`) fire it.
-   * Queued behind any refresh, so the send always follows its own load.
-   */
-  const openSelected = (name: string, send: boolean): Promise<void> =>
-    enqueue(async () => {
-      const request = state.items.find(item => item.name === name);
-      if (request === undefined) return; // deleted while queued — refresh already handled it
-      state.selectedName = name;
-      options.onOpen(request);
-      if (send) options.onSend?.();
-    });
-
-  /**
-   * Reconcile the open selection after a successful read: a vanished module
-   * clears the selection honestly; a surviving one is handed back fresh so
-   * the open view can follow hand edits.
-   */
-  const reconcileSelection = (): void => {
+  /** After a scan: a vanished open module clears honestly; a changed one is handed back fresh. */
+  const reconcileSelection = (changed: ReadonlySet<string>): void => {
     if (state.selectedName === null) return;
     const fresh = state.items.find(item => item.name === state.selectedName);
     if (fresh === undefined) {
       state.selectedName = null;
       options.onSelectionLost?.();
-      return;
+    } else if (changed.has(fresh.name)) {
+      options.onReload?.(fresh);
     }
-    options.onReload?.(fresh);
   };
 
-  const runRefresh = async (): Promise<void> => {
+  const applyScan = (scan: WorkspaceScan): void => {
+    // The cursor follows its module by NAME, so a rescan never makes the
+    // highlight drift to a neighbor. A deleted highlight clears instead of
+    // being silently re-pointed — except on the very first listing, which
+    // places the highlight like the mockup.
+    const previousName = cursorName();
+    state.loadError = null;
+    state.items = scan.requests;
+    state.groups = groupByCollection(scan.requests);
+    const kept = previousName === null ? -1 : shown().findIndex(item => item.name === previousName);
+    state.cursor = kept >= 0 ? kept : null;
+    if (state.cursor === null && state.items.length > 0 && state.previousCount === 0) state.cursor = 0;
+    state.previousCount = state.items.length;
+    reconcileSelection(new Set(scan.changed));
+    ensureVisible();
+  };
+
+  const applyError = (error: unknown): void => {
+    state.loadError = error;
+    state.items = [];
+    state.groups = [];
+    state.cursor = null;
+    state.previousCount = 0;
+    state.selectedName = null;
+    state.matchCount = null; // the count died with its list — never linger on the bar
+    options.onSelectionLost?.();
+  };
+
+  const watch = watchFolder(options.requestsDir, () => void refresh());
+
+  /** Scan and fold the result into state; says what to develop, or "same" when nothing moved. */
+  const scanAndApply = async (): Promise<Applied> => {
+    let scan: WorkspaceScan;
     try {
-      const requests = await readWorkspace(options.requestsDir);
-      state.loadError = null;
-      // The cursor follows its module by NAME, so a refresh never makes the
-      // highlight drift to a neighbor. A deleted highlight clears instead of
-      // being silently re-pointed — except on the very first listing, which
-      // places the highlight like the mockup. The name is read from the list
-      // the cursor currently indexes (ranked matches while filtering).
-      const previousName =
-        state.cursor === null ? null : (shown()[state.cursor]?.name ?? null);
-      state.items = requests;
-      state.groups = groupByCollection(requests);
-      const kept =
-        previousName === null ? -1 : shown().findIndex(item => item.name === previousName);
-      state.cursor = kept >= 0 ? kept : null;
-      if (state.cursor === null && state.items.length > 0 && state.previousCount === 0) {
-        state.cursor = 0;
-      }
-      state.previousCount = state.items.length;
-      reconcileSelection();
-      state.firstVisible = 0;
-      ensureVisible();
+      scan = await reader.scan();
     } catch (error) {
-      state.loadError = error;
-      state.items = [];
-      state.groups = [];
-      state.cursor = null;
-      state.previousCount = 0;
-      state.selectedName = null;
-      state.matchCount = null; // the count died with its list — never linger on the bar
-      options.onSelectionLost?.();
+      state.loaded = true;
+      applyError(error);
+      return null;
+    } finally {
+      watch.arm(); // the folder may exist now even if it did not at startup
     }
-    render();
+    const first = !state.loaded;
+    const recovering = state.loadError !== null;
+    state.loaded = true;
+    if (!first && !recovering && scan.changed.length === 0 && scan.removed.length === 0) return "same";
+    applyScan(scan);
+    return first ? "all" : new Set(scan.changed);
   };
 
-  const refresh = (): Promise<void> => enqueue(runRefresh);
+  const refresh = (): Promise<void> =>
+    enqueue(async () => {
+      const applied = await scanAndApply();
+      if (applied !== "same") render(applied);
+    });
 
-  /** The request the highlight sits on, in whichever list is shown. */
-  const highlighted = (): LoadedRequest | undefined =>
-    state.cursor === null ? undefined : shown()[state.cursor];
-
-  /** The module name the highlight sits on, in whichever list is shown. */
-  const cursorName = (): string | null => highlighted()?.name ?? null;
+  const reveal = (name: string): Promise<void> =>
+    enqueue(async () => {
+      const applied = await scanAndApply();
+      const index = state.loadError === null ? shown().findIndex(item => item.name === name) : -1;
+      if (index === -1) {
+        if (applied !== "same") render(applied);
+        return;
+      }
+      state.cursor = index;
+      ensureVisible();
+      render(applied === "all" ? "all" : new Set([...(applied instanceof Set ? applied : []), name]));
+      view.flash(name, "reveal");
+    });
 
   /**
    * Open the highlighted request and, with `send`, fire it — enter in the
    * tree does both in one step; the search palette only opens. A request
    * that is ALREADY open is never reloaded: enter sends the draft as the
-   * user left it (edits included), and an open-only call leaves it be. A
-   * refused send (one already in flight — the composer says so) changes
-   * nothing.
+   * user left it. Enter pulses the row whatever the send does, so the tree
+   * itself confirms the key.
    */
   const activateHighlighted = (send: boolean): Promise<void> => {
     const request = highlighted();
-    if (request === undefined) return tail;
-    if (state.selectedName !== request.name) return openSelected(request.name, send);
+    if (request === undefined) return Promise.resolve();
+    if (send) view.flash(request.name, "press");
+    if (state.selectedName !== request.name) {
+      state.selectedName = request.name;
+      options.onOpen(request);
+    }
     if (send) options.onSend?.();
-    return tail;
+    return Promise.resolve();
   };
 
   const handleKey = (key: ParsedKeyLike): boolean => {
@@ -397,15 +310,16 @@ export function startCollectionsPane(
     state.matchCount = 0;
     state.cursor = state.items.length > 0 ? 0 : null;
     state.firstVisible = 0;
-    render();
+    render("moved");
   };
 
+  /** Typing re-ranks: rows that land in a new slot develop in, so the reflow reads as motion. */
   const setFilterQuery = (query: string): void => {
     if (state.filterQuery === null) return; // not filtering: ignore stray input
     state.filterQuery = query;
     state.cursor = shown().length > 0 ? 0 : null; // typing restarts at the top match
     state.firstVisible = 0;
-    render();
+    render("moved");
   };
 
   const endFilter = (): void => {
@@ -421,23 +335,31 @@ export function startCollectionsPane(
     state.matchCount = null;
     state.firstVisible = 0;
     ensureVisible();
-    render();
+    render("moved");
   };
 
   const syncFocus = (focusedPane: string | null): void => {
     const nowFocused = focusedPane === COLLECTIONS_PANE_ID;
     if (nowFocused === state.focused) return;
     state.focused = nowFocused;
-    if (nowFocused) refresh();
+    if (nowFocused) void refresh();
   };
 
+  const onResize = (): void => render();
+  renderer.on("resize", onResize);
+  renderer.once("destroy", () => {
+    watch.close();
+    renderer.off("resize", onResize);
+  });
+
   const initialLoad = refresh();
-  render();
 
   return {
     pane,
     ready: initialLoad,
     settled: () => tail,
+    refresh,
+    reveal,
     handleKey,
     openHighlighted: () => activateHighlighted(false),
     selectRequest,
@@ -446,6 +368,7 @@ export function startCollectionsPane(
     setFilterQuery,
     endFilter,
     filterKey,
+    view,
     get filtering(): boolean { return state.filterQuery !== null; },
     get filteredCount(): number | null { return state.matchCount; },
   };

@@ -2,9 +2,10 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { BoxRenderable, RGBA } from "@opentui/core";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import type { LoadedRequest } from "../src/gen/load.ts";
-import { REQUEST_ROW_HEIGHT, methodBadge, requestRow, treeBranch } from "../src/tui/collections-render.ts";
+import { REQUEST_ROW_HEIGHT, methodBadge, treeBranch } from "../src/tui/collections-render.ts";
 import type { TreeBranch } from "../src/tui/collections-render.ts";
 import { flattenRows } from "../src/tui/collections-rows.ts";
+import { RowSlot } from "../src/tui/collections-slot.ts";
 import { THEME, methodColor } from "../src/tui/theme.ts";
 import { flatSpans, frameText } from "./helpers/tui-capture.ts";
 
@@ -20,17 +21,19 @@ afterAll(() => {
   shared?.renderer.destroy();
 });
 
-/** One request row alone in a 28-wide column (the pane's inner width), rendered. */
+/** One request row (a pane row slot) alone in a 28-wide column (the pane's inner width), rendered. */
 async function renderRow(
   request: LoadedRequest,
   selected: boolean,
-  branch?: TreeBranch,
+  branch: TreeBranch = "middle",
 ): Promise<TestRendererSetup> {
   shared ??= await createTestRenderer({ width: 30, height: REQUEST_ROW_HEIGHT });
   const setup = shared;
   for (const child of setup.renderer.root.getChildren()) setup.renderer.root.remove(child);
   const column = new BoxRenderable(setup.renderer, { width: 28, height: REQUEST_ROW_HEIGHT });
-  column.add(requestRow(setup.renderer, request, selected, undefined, branch));
+  const slot = new RowSlot(setup.renderer, () => {});
+  slot.show({ kind: "request", request, branch, selected });
+  column.add(slot.box);
   setup.renderer.root.add(column);
   await setup.renderOnce();
   return setup;

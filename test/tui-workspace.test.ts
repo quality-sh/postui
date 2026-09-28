@@ -3,7 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SavedModuleError } from "../src/gen/load.ts";
-import { WorkspaceReadError, readWorkspace } from "../src/tui/workspace.ts";
+import type { LoadedRequest } from "../src/gen/load.ts";
+import { WorkspaceReadError, readWorkspace, workspaceReader } from "../src/tui/workspace.ts";
 
 const dirs: string[] = [];
 
@@ -92,5 +93,52 @@ describe("readWorkspace", () => {
       expect(error).toBeInstanceOf(WorkspaceReadError);
       expect((error as WorkspaceReadError).message).toContain("cannot read requests folder");
     }
+  });
+});
+
+describe("workspaceReader", () => {
+  test("a rescan of an unchanged folder imports nothing: the same requests come back", async () => {
+    const dir = await makeRequestsDir();
+    await writeFile(join(dir, "create.ts"), moduleSource("POST", "https://api.dev/users"));
+    await writeFile(join(dir, "health.ts"), moduleSource("GET", "https://api.dev/health"));
+    const reader = workspaceReader(dir);
+    const first = await reader.scan();
+    expect(first.changed).toEqual(["create", "health"]);
+    const second = await reader.scan();
+    expect(second.changed).toEqual([]);
+    expect(second.removed).toEqual([]);
+    // Identity, not equality: nothing was re-imported.
+    expect(second.requests[0]).toBe(first.requests[0] as LoadedRequest);
+    expect(second.requests[1]).toBe(first.requests[1] as LoadedRequest);
+  });
+
+  test("an edit re-imports only that module; a new one joins, a deleted one is reported", async () => {
+    const dir = await makeRequestsDir();
+    await writeFile(join(dir, "edit.ts"), moduleSource("POST", "https://api.dev/users"));
+    await writeFile(join(dir, "keep.ts"), moduleSource("GET", "https://api.dev/users"));
+    await writeFile(join(dir, "gone.ts"), moduleSource("GET", "https://api.dev/users"));
+    const reader = workspaceReader(dir);
+    const first = await reader.scan();
+    await writeFile(join(dir, "edit.ts"), moduleSource("DELETE", "https://api.dev/users/1"));
+    await writeFile(join(dir, "new.ts"), moduleSource("GET", "https://api.dev/health"));
+    await rm(join(dir, "gone.ts"));
+    const next = await reader.scan();
+    expect(next.changed).toEqual(["edit", "new"]);
+    expect(next.removed).toEqual(["gone"]);
+    expect(next.requests.map(request => request.name)).toEqual(["edit", "keep", "new"]);
+    expect(next.requests[0]?.request.method).toBe("DELETE");
+    expect(next.requests[0]?.path).toBe(join(dir, "edit.ts"));
+    expect(next.requests[1]).toBe(first.requests.find(request => request.name === "keep") as LoadedRequest);
+  });
+
+  test("a failed scan records nothing, so the next scan retries the same file", async () => {
+    const dir = await makeRequestsDir();
+    await writeFile(join(dir, "fix-me.ts"), "export const request = {");
+    const reader = workspaceReader(dir);
+    await expect(reader.scan()).rejects.toBeInstanceOf(SavedModuleError);
+    await writeFile(join(dir, "fix-me.ts"), moduleSource("GET", "https://api.dev/health"));
+    const scan = await reader.scan();
+    expect(scan.changed).toEqual(["fix-me"]);
+    expect(scan.requests[0]?.request.url).toBe("https://api.dev/health");
   });
 });

@@ -34,10 +34,7 @@ type TypedKey = ParsedKeyLike & { readonly sequence?: string };
 
 /** The panes the import hands the saved request to. */
 interface RevealTargets {
-  readonly collections: Pick<
-    CollectionsPane,
-    "syncFocus" | "settled" | "selectRequest" | "openHighlighted"
-  >;
+  readonly collections: Pick<CollectionsPane, "reveal" | "openHighlighted">;
   readonly composer: Pick<ComposerPane, "loadedName">;
   /** Focus the collections pane (the shell's tab/click path). */
   focusCollections(): void;
@@ -281,27 +278,23 @@ function importErrorText(error: unknown, requestsDir: string): string {
 }
 
 /**
- * Show a freshly saved request: re-read requests/, highlight it, open it in
- * the composer, and say what it needs before it can send. Everything goes
- * through the collections pane's own paths (refresh on focus regain, click
- * select, open without sending), so the tree and the composer agree on the open
- * request exactly as if the user had navigated to it.
+ * Show a freshly saved request: the collections pane rescans, highlights
+ * it and develops its row in with a pulse (reveal), the composer opens it,
+ * and the note says what it needs before it can send. Everything goes
+ * through the collections pane's own paths (reveal, open without sending),
+ * so the tree and the composer agree on the open request exactly as if the
+ * user had navigated to it.
  */
 async function revealImported(targets: RevealTargets, result: SaveResult): Promise<void> {
-  // The pane re-reads the folder when it REGAINS focus; drop its focus flag
-  // first so the focus move is a regain even when it was already focused.
-  targets.collections.syncFocus(null);
+  // Reveal first: the focus move's own rescan then finds nothing new.
+  const revealed = targets.collections.reveal(result.name);
   targets.focusCollections();
-  await targets.collections.settled();
-  targets.collections.selectRequest(result.name);
+  await revealed;
   // Open, never send: an import must not fire the request it just saved.
-  // The refresh has reloaded a module that was open under this name
-  // (re-created after a delete), so it opens only when the composer holds
+  // A module that was open under this name (re-created after a delete) was
+  // reloaded by the rescan, so it opens only when the composer holds
   // something else.
-  if (targets.composer.loadedName !== result.name) {
-    await targets.collections.openHighlighted();
-    await targets.collections.settled();
-  }
+  if (targets.composer.loadedName !== result.name) await targets.collections.openHighlighted();
   targets.showNote(importNote(result));
   notify(`imported ${result.name}`, "success");
 }

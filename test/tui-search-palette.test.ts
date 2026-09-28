@@ -1,8 +1,9 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { instantClock, setFxClock } from "../src/tui/fx/clock.ts";
 import { COLLECTIONS_PANE_ID, startShell } from "../src/tui/shell.ts";
 import { frameText, rowContaining } from "./helpers/tui-capture.ts";
 
@@ -41,7 +42,14 @@ async function setupSearch(files: Record<string, string>): Promise<SearchSetup> 
   return searchSetup;
 }
 
+// Effects land their end state at once: these tests assert settled frames.
+let restoreClock = (): void => {};
+beforeAll(() => {
+  restoreClock = setFxClock(instantClock());
+});
+
 afterAll(async () => {
+  restoreClock();
   for (const setup of setups.toReversed()) {
     setup.shell.dispose();
     setup.renderer.destroy();

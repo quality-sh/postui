@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { LoadedRequest } from "../src/gen/load.ts";
 import { flattenRows, steppedRequestRow } from "../src/tui/collections-rows.ts";
 import {
+  clampWindow,
   visibleRowCount,
   windowForCursor,
+  windowSlots,
 } from "../src/tui/collections-window.ts";
 
 /** A fake loaded request; identity (object identity) is what matters. */
@@ -79,13 +81,46 @@ describe("scroll window", () => {
     expect(windowForCursor(rows, 1, visible, 0)).toBe(0);
     // Cursor on the second request (offset 3): rows 2..3 need start 2.
     expect(windowForCursor(rows, 3, visible, 0)).toBe(2);
-    // Scrolling back up: the row becomes the window start (offset 1).
-    expect(windowForCursor(rows, 1, visible, 2)).toBe(1);
+    // Scrolling back up to a group's first row brings its header along:
+    // the window never splits a header from its rows.
+    expect(windowForCursor(rows, 1, visible, 2)).toBe(0);
   });
 
   test("windowForCursor clamps to the layout and ignores unknown rows", () => {
     const rows = flattenRows(items, groups, null);
     expect(windowForCursor(rows, 1, 100, 0)).toBe(0); // tall window never scrolls
     expect(windowForCursor(rows, 99, 5, 2)).toBe(2); // unknown row: unchanged
+  });
+});
+
+describe("pinned group headers", () => {
+  // One group of five: #G, r1..r5 (layout rows 0..5).
+  const five = ["r1", "r2", "r3", "r4", "r5"].map(name => req(name));
+  const rows = flattenRows(five, [{ title: "G", requests: five }], null);
+  const shown = (start: number, visible: number): string[] =>
+    windowSlots(rows, start, visible).map(slot =>
+      slot.row.kind === "header" ? `${slot.pinned ? "^" : "#"}${slot.row.title}` : slot.row.request.name,
+    );
+
+  test("a window that starts mid-group pins the group's header over its rows", () => {
+    expect(shown(0, 3)).toEqual(["#G", "r1", "r2"]);
+    expect(shown(3, 3)).toEqual(["^G", "r3", "r4"]);
+  });
+
+  test("scrolling down keeps the cursor row under the pin", () => {
+    // Cursor on r5 (row 5) in a 3-row window: the pin takes one slot, so r4 and r5 show.
+    const start = windowForCursor(rows, 5, 3, 0);
+    expect(shown(start, 3)).toEqual(["^G", "r4", "r5"]);
+  });
+
+  test("scrolling up onto a group's first row starts on its real header", () => {
+    expect(windowForCursor(rows, 1, 3, 4)).toBe(0);
+    expect(clampWindow(rows, 1, 3)).toBe(0); // a start on the first request is its header
+  });
+
+  test("the flat match list and a one-row window never pin", () => {
+    const flat = flattenRows(five, [], five);
+    expect(windowSlots(flat, 2, 2).some(slot => slot.pinned)).toBe(false);
+    expect(windowSlots(rows, 3, 1).map(slot => slot.pinned)).toEqual([false]);
   });
 });

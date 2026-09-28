@@ -1,5 +1,5 @@
-import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
-import type { CliRenderer } from "@opentui/core";
+import { StyledText, TextRenderable, bold, fg } from "@opentui/core";
+import type { BoxRenderable, CliRenderer } from "@opentui/core";
 import type { LoadedRequest } from "../gen/load.ts";
 import type { FlatRow } from "./collections-rows.ts";
 import { errorName, namedErrorText, renderEmptyState } from "./render.ts";
@@ -82,60 +82,52 @@ export function renderError(renderer: CliRenderer, pane: BoxRenderable, error: u
   );
 }
 
+/** One coloured run of a row's text: rows are built as spans, then styled or developed. */
+export interface RowSpan {
+  readonly text: string;
+  readonly fg: string;
+  readonly bold?: boolean;
+}
+
+/** Spans → the StyledText a row's TextRenderable shows. */
+export function styledSpans(spans: readonly RowSpan[]): StyledText {
+  return new StyledText(
+    spans.map(span => (span.bold === true ? bold(fg(span.fg)(span.text)) : fg(span.fg)(span.text))),
+  );
+}
+
 /** Collection header: the mockup's "▾ Users" line. */
-export function headerRow(renderer: CliRenderer, title: string): TextRenderable {
-  return new TextRenderable(renderer, {
-    content: new StyledText([fg(THEME.color.dim)("▾ "), bold(fg(THEME.color.text)(title))]),
-  });
+export function headerSpans(title: string): RowSpan[] {
+  return [
+    { text: "▾ ", fg: THEME.color.dim },
+    { text: title, fg: THEME.color.text, bold: true },
+  ];
 }
 
 /** The guide glyph of one row, left of its method badge. */
 const GUIDES: Record<TreeBranch, string> = { middle: "├ ", last: "└ ", none: "  " };
 
 /**
- * One request row, one terminal row: bar column, the collection's tree
- * guide (`├` / `└`), method badge, name. The SELECTED row carries the
- * accent `▌` bar in its first column over an accent-soft fill across the
- * pane; every other row leaves that column blank on the pane's own panel.
- * Badges take their method's color (theme.ts methodColor).
- *
- * With `onSelect`, a left click anywhere on the row selects it (the event
- * bubbles from the row's text up to this box) — the same highlight move
- * j/k performs, nothing more. The selected row's box is the returned
- * renderable, so the pane can pulse its fill.
+ * One request row's text: bar column, the collection's tree guide (`├` /
+ * `└`), method badge, name. The SELECTED row carries the `▌` bar in its
+ * first column (accent, or `bar` while a pulse runs); every other row
+ * leaves that column blank. Badges take their method's color (theme.ts
+ * methodColor). The accent-soft fill under a selected row is the row box's
+ * background, not part of the text (collections-slot.ts).
  */
-export function requestRow(
-  renderer: CliRenderer,
+export function requestSpans(
   request: LoadedRequest,
+  branch: TreeBranch,
   selected: boolean,
-  onSelect?: (request: LoadedRequest) => void,
-  branch: TreeBranch = "middle",
-): BoxRenderable {
-  const row = new BoxRenderable(renderer, {
-    height: REQUEST_ROW_HEIGHT,
-    width: "100%",
-    ...(selected ? { backgroundColor: THEME.color.accentSoft } : {}),
-  });
-  if (onSelect !== undefined) {
-    row.onMouseDown = (event) => {
-      if (event.type !== "down" || event.button !== 0) return;
-      onSelect(request);
-    };
-  }
+  bar: string = THEME.color.accent,
+): RowSpan[] {
   const method = request.request.method.toUpperCase();
-  const name = displayName(request.name);
-  row.add(
-    new TextRenderable(renderer, {
-      content: new StyledText([
-        selected ? bold(fg(THEME.color.accent)("▌")) : fg(THEME.color.border)(" "),
-        fg(THEME.color.border)(GUIDES[branch]),
-        bold(fg(methodColor(method))(methodBadge(method).padEnd(BADGE_WIDTH))),
-        selected ? bold(fg(THEME.color.text)(name)) : fg(THEME.color.text)(name),
-      ]),
-      wrapMode: "none",
-    }),
-  );
-  return row;
+  return [
+    selected ? { text: "▌", fg: bar, bold: true } : { text: " ", fg: THEME.color.border },
+    { text: GUIDES[branch], fg: THEME.color.border },
+    { text: methodBadge(method).padEnd(BADGE_WIDTH), fg: methodColor(method), bold: true },
+    { text: displayName(request.name), fg: THEME.color.text, bold: selected },
+  ];
 }
 
 /** The method column: the longest badge (PATCH) plus one space. */

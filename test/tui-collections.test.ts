@@ -1,9 +1,10 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { RGBA } from "@opentui/core";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { instantClock, setFxClock } from "../src/tui/fx/clock.ts";
 import { COLLECTIONS_PANE_ID, startShell } from "../src/tui/shell.ts";
 import { THEME } from "../src/tui/theme.ts";
 import { flatSpans, frameText, rowContaining } from "./helpers/tui-capture.ts";
@@ -65,7 +66,14 @@ async function refocus(setup: CollectionsSetup): Promise<void> {
   await setup.renderOnce();
 }
 
+// Effects land their end state at once: these tests assert settled frames.
+let restoreClock = (): void => {};
+beforeAll(() => {
+  restoreClock = setFxClock(instantClock());
+});
+
 afterAll(async () => {
+  restoreClock();
   // Destroy every renderer so the key-input listeners do not pile up
   // (createTestRenderer ones would otherwise warn about leaks).
   for (const setup of setups.toReversed()) {
@@ -269,23 +277,6 @@ describe("collections pane", () => {
     await rm(join(setup.dir, "broken.ts"));
     await refocus(setup);
     expect(frameText(setup, HEIGHT)).not.toContain("SavedModuleError");
-  });
-
-  test("long lists scroll: the window follows the highlight", async () => {
-    const files: Record<string, string> = {};
-    const names = Array.from({ length: 20 }, (_, index) => `req${String(index + 1).padStart(2, "0")}`);
-    for (const name of names) files[`${name}.ts`] = moduleSource("GET", "https://api.dev/users");
-    const setup = await setupCollections(files);
-    // At height 24 the pane shows 18 rows: one header plus 17 one-row requests.
-    expect(frameText(setup, HEIGHT)).toContain("req17");
-    expect(frameText(setup, HEIGHT)).not.toContain("req18");
-    await setup.mockInput.pressKeys(Array.from({ length: 18 }, () => "j"));
-    await setup.flush();
-    await setup.renderOnce();
-    const text = frameText(setup, HEIGHT);
-    expect(text).toContain("req19");
-    expect(rowContaining(setup, "▌")).toContain("req19");
-    expect(text).not.toContain("req01"); // scrolled out of the window
   });
 
   test("pane keys are inert while another pane holds focus", async () => {
