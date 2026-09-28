@@ -8,6 +8,7 @@ import type { ComposerPane } from "./composer.ts";
 import { RESPONSE_PANE_ID, startResponsePane } from "./response-pane.ts";
 import type { ResponsePane } from "./response-pane.ts";
 import { FocusRegistry } from "./focus.ts";
+import { attachImportPrompt } from "./import.ts";
 import { globalAction } from "./keymap.ts";
 import type { GlobalAction, ParsedKeyLike } from "./keymap.ts";
 import { settleBorder, sweepBorder } from "./motion.ts";
@@ -317,7 +318,9 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     }
   };
 
+  const importer = attachImportPrompt(renderer, root, { requestsDir: options.requestsDir, collections, composer, response, focusPane, endSearch });
   const keyListener = (key: ParsedKeyLike): void => {
+    if (importer.handleKey(key)) return; // ctrl+n opens it; while open it owns the keys
     if (search.active && searchKey(key)) return;
     if (focus.focused === COLLECTIONS_PANE_ID && collections.handleKey(key)) return;
     if (focus.focused === COMPOSER_PANE_ID && composer.handleKey(key)) return;

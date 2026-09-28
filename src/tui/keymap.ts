@@ -27,7 +27,7 @@ export const GLOBAL_KEYS: readonly KeyHint[] = [
 ] as const;
 
 /** App-level actions the shell itself handles. */
-export type GlobalAction = "quit" | "focus-next" | "focus-previous" | "search";
+export type GlobalAction = "quit" | "focus-next" | "focus-previous" | "search" | "import";
 
 /** Minimal shape of a parsed keypress (a subset of OpenTUI's KeyEvent). */
 export interface ParsedKeyLike {
@@ -43,6 +43,7 @@ export function globalAction(key: ParsedKeyLike): GlobalAction | null {
   // they reach this global map — by running before it in the shell's
   // key listener.
   if (key.ctrl && key.name === "c") return "quit";
+  if (key.ctrl && key.name === "n") return "import";
   if (key.name === "q") return "quit";
   if (key.name === "tab") return key.shift === true ? "focus-previous" : "focus-next";
   if (key.name === "/") return "search";
