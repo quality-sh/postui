@@ -50,7 +50,7 @@ describe("composer pane", () => {
     expect(post?.fg.equals(accent)).toBe(true);
   });
 
-  test("h/l switch the composer tabs and the field view follows", async () => {
+  test("←/→ on the tab strip switch the composer tabs and the content follows", async () => {
     const app = await setupApp({
       "hooked.ts": moduleSource("GET", "https://api.dev/users?limit=5", {
         headers: { accept: "application/json", authorization: `Bearer ${CANARY}` },
@@ -60,22 +60,24 @@ describe("composer pane", () => {
     await focusComposer(app);
     // default tab is BODY (mockup); no body → honest empty state
     expect(frameText(app, HEIGHT)).toContain("(no body)");
-    // l → AUTH: credential values render redacted even at rest
-    app.mockInput.pressKey("l");
+    app.mockInput.pressArrow("down"); // URL → tab strip
     await app.flush();
-    expect(frameText(app, HEIGHT)).toContain("AUTH");
-    expect(frameText(app, HEIGHT)).toContain(`authorization: [redacted]`);
+    expect(app.shell.composer.field).toBe("tabs");
+    // → AUTH: credential values render redacted even at rest
+    app.mockInput.pressArrow("right");
+    await app.flush();
+    expect(frameText(app, HEIGHT)).toContain("authorization: [redacted]");
+    expect(frameText(app, HEIGHT)).toContain("literal — will not save");
     expect(frameText(app, HEIGHT)).not.toContain(CANARY);
-    // l wraps around to PARAMS
-    app.mockInput.pressKey("l");
+    // → wraps around to PARAMS
+    app.mockInput.pressArrow("right");
     await app.flush();
-    expect(frameText(app, HEIGHT)).toContain("PARAMS");
     expect(frameText(app, HEIGHT)).toContain("limit = 5");
-    // l → HEADERS
-    app.mockInput.pressKey("l");
+    // → HEADERS: the credential stays redacted here too
+    app.mockInput.pressArrow("right");
     await app.flush();
-    expect(frameText(app, HEIGHT)).toContain("HEADERS");
     expect(frameText(app, HEIGHT)).toContain("accept: application/json");
+    expect(frameText(app, HEIGHT)).not.toContain(CANARY);
   });
 
   test("send success renders the bounded digest: status, latency, size, body", async () => {
@@ -172,17 +174,56 @@ describe("composer pane", () => {
     server.close();
   });
 
-  test("j and q fall through from the composer: no hijack of global keys", async () => {
+  test("the focused URL consumes every printable key: j, q and / type, never navigate, quit or search", async () => {
     const app = await setupApp({
       "one.ts": moduleSource("GET", "https://api.dev/one"),
     });
     await openFirstRequest(app);
     await focusComposer(app);
+    let quit = false;
+    void app.shell.onQuit.then(() => {
+      quit = true;
+      return quit;
+    });
     const before = rowContaining(app, "▶");
-    app.mockInput.pressKey("j");
+    await app.mockInput.typeText("jq/");
     await app.flush();
-    expect(rowContaining(app, "▶")).toBe(before); // j is not the composer's
+    expect(app.shell.composer.isEditingText()).toBe(true);
+    expect(frameText(app, HEIGHT)).toContain("https://api.dev/onejq/");
+    expect(rowContaining(app, "▶")).toBe(before);
     expect(app.shell.focus.focused).toBe("composer");
+    expect(app.shell.searching).toBe(false);
+    expect(quit).toBe(false);
   });
 
+  test("off the text fields q falls through to the global map and quits", async () => {
+    const app = await setupApp({
+      "one.ts": moduleSource("GET", "https://api.dev/one"),
+    });
+    await openFirstRequest(app);
+    await focusComposer(app);
+    let quit = false;
+    void app.shell.onQuit.then(() => {
+      quit = true;
+      return quit;
+    });
+    app.mockInput.pressArrow("down"); // the tab strip is not a text field
+    await app.flush();
+    expect(app.shell.composer.isEditingText()).toBe(false);
+    app.mockInput.pressKey("q");
+    await app.flush();
+    expect(quit).toBe(true);
+  });
+
+  test("one frame: the tab content has no box of its own and no in-pane hint line", async () => {
+    const app = await setupApp({
+      "note.ts": moduleSource("POST", "https://api.dev/notes", { body: "hello" }),
+    });
+    await openFirstRequest(app);
+    const text = frameText(app, HEIGHT);
+    expect(text).not.toContain("─BODY─"); // the old titled inner box
+    // the gutter sits right against the pane border: no nested border between
+    expect(rowContaining(app, "1 │ hello")).toMatch(/│1 │ hello/);
+    expect(text).not.toContain("u edit url");
+  });
 });

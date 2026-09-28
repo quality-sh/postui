@@ -1,19 +1,21 @@
 import { BoxRenderable } from "@opentui/core";
 import type { CliRenderer } from "@opentui/core";
+import { writeFileAtomic } from "../fs/atomic.ts";
+import type { LoadedRequest } from "../gen/load.ts";
+import type { SendResult } from "../send/send.ts";
+import { editorKey, isEditingText, loadDraft, newEditorState } from "./composer-editor.ts";
+import type { ComposerField, EditorEffect } from "./composer-editor.ts";
+import { renderComposerPane } from "./composer-render.ts";
+import type { ComposerMessage } from "./composer-render.ts";
+import { DraftSaveRefusedError, draftModule } from "./composer-save.ts";
 import { draftCredentialValues, draftOf, sendDraft } from "./composer-send.ts";
 import type { RequestDraft } from "./composer-send.ts";
-import type { LoadedRequest } from "../gen/load.ts";
-import { COMPOSER_RENDER_TABS, renderComposerPane } from "./composer-render.ts";
-import type { ComposerRenderState } from "./composer-render.ts";
-import type { ParsedKeyLike } from "./keymap.ts";
-import { clearChildren } from "./render.ts";
-import type { SendResult } from "../send/send.ts";
+import type { ComposerKey } from "./composer-text.ts";
+import { clearChildren, errorLine } from "./render.ts";
 import { THEME } from "./theme.ts";
 
 /** The pane id used in the shell's focus registry (tab order). */
 export const COMPOSER_PANE_ID = "composer";
-
-export type ComposerTab = "params" | "headers" | "body" | "auth";
 
 /**
  * What the composer tells the response pane (the diagnostic region). The
@@ -43,9 +45,17 @@ export interface ComposerPane {
   readonly pane: BoxRenderable;
   /** The request loaded into the composer, if any. */
   readonly loadedName: string | null;
-  /** True when the draft was edited since it was loaded from the module. */
+  /** True while the draft differs from the module on disk (the ● marker). */
   readonly edited: boolean;
-  /** Load a saved request into an in-memory draft (the module stays the source). */
+  /** The field inside the composer that has the keys. */
+  readonly field: ComposerField;
+  /**
+   * True while a text field (URL, body, a table cell) has the keys: every
+   * printable key — "q" and "/" included — types there instead of reaching
+   * the global map.
+   */
+  isEditingText(): boolean;
+  /** Load a saved request into an in-memory draft. */
   load(request: LoadedRequest): void;
   /** Drop the draft (the module it came from is gone). */
   clear(): void;
@@ -58,20 +68,23 @@ export interface ComposerPane {
    */
   send(bodyWindow?: number): boolean;
   /** Handle a keypress while the pane is focused; true = consumed. */
-  handleKey(key: ParsedKeyLike): boolean;
-  /** Resolves when the send currently in flight (if any) has settled. */
+  handleKey(key: ComposerKey): boolean;
+  /** Tell the composer which pane has app focus (field focus shows only when it is this one). */
+  syncFocus(focusedPaneId: string | null): void;
+  /** Resolves when the send or save currently in flight (if any) has settled. */
   settled(): Promise<void>;
 }
 
-type EditTarget = "url" | "body";
+/** Canonical form of a draft for the dirty check. */
+const draftKey = (draft: RequestDraft | null): string => JSON.stringify(draft);
 
 /**
- * The composer: the mockup's method display, URL field, PARAMS/HEADERS/BODY/
- * AUTH tabs and line-numbered body editor. Editing is display plus minor
- * field editing of an IN-MEMORY draft — the saved module is never written
- * back and remains the source of truth; a reload from collections resets the
- * draft. SEND executes the draft through the real pipeline (sendDraft →
- * sendRequest), never a TUI-local reimplementation.
+ * The composer: METHOD, URL, PARAMS/HEADERS/BODY/AUTH and the body editor
+ * over an IN-MEMORY draft of a saved request. Keys edit the draft directly
+ * (composer-editor.ts); SEND executes it through the real pipeline
+ * (sendDraft → sendRequest), never a TUI-local reimplementation; ctrl+s
+ * writes it back to its own module in the `postui save` shape
+ * (composer-save.ts), refusing literal credentials.
  */
 export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOptions): ComposerPane {
   const pane = new BoxRenderable(renderer, {
@@ -84,14 +97,15 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     backgroundColor: THEME.color.bg,
   });
 
+  const editor = newEditorState();
   const state = {
     request: null as LoadedRequest | null,
-    draft: null as RequestDraft | null,
-    edited: false, // draft differs from the loaded module (this session)
-    tab: "body" as ComposerTab, // the mockup opens on BODY
-    editing: null as EditTarget | null,
-    editBackup: "",
+    /** draftKey of what the module on disk holds. */
+    baseline: "",
     inFlight: false,
+    focused: false,
+    message: null as ComposerMessage | null,
+    scroll: { bodyTop: 0 },
   };
 
   let tail: Promise<void> = Promise.resolve();
@@ -101,111 +115,23 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     return done;
   };
 
+  const dirty = (): boolean => state.request !== null && draftKey(editor.draft) !== state.baseline;
+
   const render = (): void => {
     clearChildren(pane);
-    const renderState: ComposerRenderState = {
+    renderComposerPane(renderer, pane, {
       request: state.request,
-      draft: state.draft,
-      edited: state.edited,
-      tab: state.tab,
-      editing: state.editing,
+      editor,
+      dirty: dirty(),
       inFlight: state.inFlight,
-    };
-    renderComposerPane(renderer, pane, renderState);
-  };
-
-  const startEditing = (target: EditTarget): void => {
-    if (state.draft === null) return;
-    if (target === "body" && typeof state.draft.body !== "string") {
-      // Form and empty bodies are not line-editable; the module is the editor
-      // for those — say so instead of failing silently.
-      options.diagnostics.showNote("form and empty bodies are edited in the saved module");
-      return;
-    }
-    state.editing = target;
-    state.editBackup = target === "url" ? state.draft.url : (state.draft.body as string);
-    render();
-  };
-
-  const cancelEditing = (): void => {
-    if (state.editing === null || state.draft === null) return;
-    if (state.editing === "url") state.draft.url = state.editBackup;
-    else state.draft.body = state.editBackup;
-    state.editing = null;
-    render();
-  };
-
-  const commitEditing = (): void => {
-    if (state.editing === null || state.draft === null) return;
-    // Only a real change marks the draft edited (u then enter is a no-op).
-    const changed =
-      state.editing === "url"
-        ? state.draft.url !== state.editBackup
-        : (state.draft.body as string) !== state.editBackup;
-    if (changed) state.edited = true;
-    state.editing = null;
-    render();
-  };
-
-  const appendToEditing = (text: string): void => {
-    if (state.editing === null || state.draft === null) return;
-    if (state.editing === "url") state.draft.url += text;
-    else state.draft.body = (state.draft.body as string) + text;
-    render();
-  };
-
-  const backspaceEditing = (): void => {
-    if (state.editing === null || state.draft === null) return;
-    if (state.editing === "url") state.draft.url = state.draft.url.slice(0, -1);
-    else state.draft.body = (state.draft.body as string).slice(0, -1);
-    render();
-  };
-
-  const stepTab = (delta: 1 | -1): void => {
-    const index = COMPOSER_RENDER_TABS.indexOf(state.tab);
-    const next = COMPOSER_RENDER_TABS[(index + delta + COMPOSER_RENDER_TABS.length) % COMPOSER_RENDER_TABS.length];
-    state.tab = next as ComposerTab;
-    render();
-  };
-
-  /** Keys while an edit is active; everything is consumed (true) except ctrl. */
-  const handleEditingKey = (key: ParsedKeyLike): void => {
-    if (key.name === "return" || key.name === "enter") commitEditing();
-    else if (key.name === "escape" || key.name === "") cancelEditing(); // a lone ESC byte parses unnamed
-    else if (key.name === "backspace") backspaceEditing();
-    else if (key.name.length === 1) appendToEditing(key.name);
-  };
-
-  const handleKey = (key: ParsedKeyLike): boolean => {
-    if (key.ctrl) return false; // ctrl+c must stay a shell-level quit
-    if (state.editing !== null) {
-      // An active edit consumes every printable key — including "q" and "/",
-      // which must never leak to the global map while typing (keymap note).
-      handleEditingKey(key);
-      return true;
-    }
-    if (state.draft === null) return false; // nothing loaded: keys fall through
-    if (key.name === "return" || key.name === "enter" || key.name === "s") {
-      send();
-      return true;
-    }
-    if (key.name === "u" || key.name === "b") {
-      startEditing(key.name === "u" ? "url" : "body");
-      return true;
-    }
-    if (key.name === "h" || key.name === "left") {
-      stepTab(-1);
-      return true;
-    }
-    if (key.name === "l" || key.name === "right") {
-      stepTab(1);
-      return true;
-    }
-    return false;
+      focused: state.focused,
+      message: state.message,
+      scroll: state.scroll,
+    });
   };
 
   const send = (bodyWindow?: number): boolean => {
-    const draft = state.draft;
+    const draft = editor.draft;
     const request = state.request;
     if (draft === null || request === null) return false;
     if (state.inFlight) {
@@ -216,10 +142,12 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     state.inFlight = true;
     options.diagnostics.showSending();
     render();
+    // The pipeline gets a snapshot: typing during the send edits the next one.
+    const sent = structuredClone(draft);
     void enqueue(async () => {
       try {
-        const { result, latencyMs } = await sendDraft(draft, request.name, bodyWindow);
-        options.diagnostics.showResult(result, latencyMs, draftCredentialValues(draft), request.name);
+        const { result, latencyMs } = await sendDraft(sent, request.name, bodyWindow);
+        options.diagnostics.showResult(result, latencyMs, draftCredentialValues(sent), request.name);
       } catch (error) {
         // Named typed errors land on the diagnostic region — never a stack
         // trace, never a crash. MissingEnvError arrives before any network
@@ -233,6 +161,72 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     return true;
   };
 
+  /**
+   * Ctrl+S. The module text and the credential checks run synchronously, so
+   * a refusal shows at once and the baseline moves with the keypress; the
+   * atomic write follows on the queue. A failed write restores the old
+   * baseline (the ● comes back).
+   */
+  const save = (): void => {
+    const draft = editor.draft;
+    const request = state.request;
+    if (draft === null || request === null) return;
+    let module: ReturnType<typeof draftModule>;
+    try {
+      module = draftModule(draft);
+    } catch (error) {
+      if (!(error instanceof DraftSaveRefusedError)) throw error;
+      state.message = { text: error.message, tone: "error" };
+      return;
+    }
+    draft.url = module.url; // what the module now stores (URL normalization)
+    editor.urlCursor = Math.min(editor.urlCursor, draft.url.length);
+    const previous = state.baseline;
+    const saved = draftKey(draft);
+    state.baseline = saved;
+    void enqueue(async () => {
+      try {
+        await writeFileAtomic(request.path, module.source);
+        state.message = { text: `saved ${request.name}.ts`, tone: "ok" };
+      } catch (error) {
+        if (state.baseline === saved) state.baseline = previous;
+        state.message = { text: errorLine(error), tone: "error" };
+      }
+      render();
+    });
+  };
+
+  const applyEffect = (effect: EditorEffect): void => {
+    if (effect === "send") send();
+    else if (effect === "save") save();
+    else if (effect === "form-body") {
+      state.message = { text: "form bodies are edited in the saved module", tone: "note" };
+    }
+  };
+
+  const handleKey = (key: ComposerKey): boolean => {
+    if (key.ctrl && key.name === "c") return false; // ctrl+c stays a shell-level quit
+    const effect = editorKey(editor, key);
+    if (effect === null) return false;
+    if (effect !== "save") state.message = null; // a message lasts until the next key
+    applyEffect(effect);
+    render();
+    return true;
+  };
+
+  const load = (request: LoadedRequest): void => {
+    const sameRequest = state.request?.name === request.name;
+    state.request = request;
+    const draft = draftOf(request);
+    loadDraft(editor, draft, sameRequest);
+    state.baseline = draftKey(draft);
+    if (!sameRequest) {
+      state.message = null;
+      state.scroll.bodyTop = 0;
+    }
+    render();
+  };
+
   render();
 
   return {
@@ -241,24 +235,28 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
       return state.request?.name ?? null;
     },
     get edited(): boolean {
-      return state.edited;
+      return dirty();
     },
-    load(request: LoadedRequest): void {
-      state.request = request;
-      state.draft = draftOf(request);
-      state.edited = false;
-      state.editing = null;
-      render();
+    get field(): ComposerField {
+      return editor.field;
     },
+    isEditingText: () => isEditingText(editor),
+    load,
     clear(): void {
       state.request = null;
-      state.draft = null;
-      state.edited = false;
-      state.editing = null;
+      editor.draft = null;
+      state.baseline = "";
+      state.message = null;
       render();
     },
     send,
     handleKey,
+    syncFocus(focusedPaneId: string | null): void {
+      const focused = focusedPaneId === COMPOSER_PANE_ID;
+      if (focused === state.focused) return;
+      state.focused = focused;
+      render();
+    },
     settled: () => tail,
   };
 }

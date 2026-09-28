@@ -260,16 +260,13 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     focus.focus(id);
     repaintFocus();
     collections.syncFocus(focus.focused);
+    composer.syncFocus(focus.focused);
     repaintStatusBar(); // the bar shows the focused pane's hints
   };
 
-  /**
-   * The composer's text-field state, read through an optional method so the
-   * shell works with composers that do not report it (yet).
-   */
+  /** True while a composer text field (URL, body, table cell) has the keys. */
   const composerEditing = (): boolean =>
-    focus.focused === COMPOSER_PANE_ID &&
-    (composer as Partial<{ isEditingText(): boolean }>).isEditingText?.() === true;
+    focus.focused === COMPOSER_PANE_ID && composer.isEditingText();
   const textFocused = options.isEditingText ?? composerEditing;
 
   /**
