@@ -106,7 +106,8 @@ interface TestsListing {
  */
 export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOptions): ResponsePane {
   const pane = new BoxRenderable(renderer, {
-    flexGrow: 1,
+    flexGrow: 3, // 3 : 2 with the composer (see composer.ts)
+    flexBasis: 0,
     width: "100%",
     border: true,
     borderStyle: "rounded",

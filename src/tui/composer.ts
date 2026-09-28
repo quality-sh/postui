@@ -78,7 +78,10 @@ export interface ComposerPane {
  */
 export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOptions): ComposerPane {
   const pane = new BoxRenderable(renderer, {
-    flexGrow: 1,
+    // 2 : 3 with the response pane, from a zero basis: the response is
+    // where the content lands, so it gets the larger share.
+    flexGrow: 2,
+    flexBasis: 0,
     width: "100%",
     border: true,
     borderStyle: "rounded",

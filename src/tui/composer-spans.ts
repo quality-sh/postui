@@ -37,6 +37,7 @@ export function lineText(renderer: CliRenderer, spans: readonly Span[]): TextRen
     content: new StyledText(chunks.length === 0 ? [fg(THEME.color.text)(" ")] : chunks),
     width: "100%",
     wrapMode: "none",
+    flexShrink: 0, // one row, always: a squeezed line slides under the rule
   });
 }
 

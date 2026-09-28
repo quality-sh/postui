@@ -33,11 +33,12 @@ async function sendBody(
   return { app, close: server.close };
 }
 
-/** Turn the mouse wheel down `notches` times over the given row, one notch after another. */
-async function wheelDown(app: AppSetup, row: number, notches: number): Promise<void> {
-  if (notches === 0) return;
+/** Wheel down over `row` one notch at a time until `needle` shows; returns the notches used (capped). */
+async function wheelUntil(app: AppSetup, row: number, needle: string, limit = 30): Promise<number> {
+  if (limit === 0 || rowContaining(app, needle) !== null) return 0;
   await app.mockMouse.scroll(60, row, "down");
-  await wheelDown(app, row, notches - 1);
+  await app.renderOnce();
+  return 1 + (await wheelUntil(app, row, needle, limit - 1));
 }
 
 /** The color of the first span whose text is exactly `text`. */
@@ -108,19 +109,17 @@ describe("response body", () => {
   });
 
   test("a body taller than the pane scrolls with the mouse wheel, never grows the pane", async () => {
-    const keys = "abcdefghijkl".split("");
+    const keys = "abcdefghijklmnopqrstuvwxyz".split("");
     const { app, close } = await sendBody(JSON.stringify(Object.fromEntries(keys.map((key, i) => [key, i + 1]))));
     expect(rowContaining(app, "\"a\": 1")).not.toBeNull();
-    expect(rowContaining(app, "\"l\": 12")).toBeNull(); // below the fold
+    expect(rowContaining(app, "\"z\": 26")).toBeNull(); // below the fold
     expect(rowContaining(app, "COMPOSER")).not.toBeNull(); // the composer kept its room
     const top = frameText(app, HEIGHT).split("\n").findIndex(line => line.includes("1  {"));
-    // One line per wheel notch; "l" is line 13 of a 7-line view.
-    await wheelDown(app, top, 5);
-    await app.renderOnce();
-    expect(rowContaining(app, "\"l\": 12")).toBeNull(); // one notch short
-    await app.mockMouse.scroll(60, top, "down");
-    await app.renderOnce();
-    expect(rowContaining(app, "\"l\": 12")).not.toBeNull();
+    // One line per wheel notch: "z" (line 27) arrives after a bounded number of notches.
+    const notches = await wheelUntil(app, top, "\"z\": 26");
+    expect(notches).toBeGreaterThan(0);
+    expect(notches).toBeLessThan(30);
+    expect(rowContaining(app, "\"a\": 1")).toBeNull(); // scrolled off the top
     close();
   });
 

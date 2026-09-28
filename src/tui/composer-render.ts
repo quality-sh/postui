@@ -99,11 +99,12 @@ export function renderComposerPane(renderer: CliRenderer, pane: BoxRenderable, s
   pane.add(tabStrip(renderer, state));
   // A single rule under the strip instead of a second bordered box.
   pane.add(
-    new BoxRenderable(renderer, { border: ["top"], borderColor: THEME.color.border, height: 1, width: "100%" }),
+    new BoxRenderable(renderer, { border: ["top"], borderColor: THEME.color.border, height: 1, width: "100%", flexShrink: 0 }),
   );
   const content = new BoxRenderable(renderer, {
     flexDirection: "column",
     flexGrow: 1,
+    minHeight: 0,
     width: "100%",
     overflow: "hidden",
     // One cell in from the frame, level with the pills and the tab strip.
@@ -185,6 +186,7 @@ function sendRow(renderer: CliRenderer, pane: BoxRenderable, state: ComposerRend
     gap: 1,
     width: "100%",
     height: 1,
+    flexShrink: 0,
     marginBottom: SEND_ROW_ROWS - 1,
   });
   const field = state.focused ? state.editor.field : null;
@@ -260,7 +262,7 @@ function urlText(renderer: CliRenderer, pane: BoxRenderable, url: string, cursor
  * from the old tab to the new one.
  */
 function tabStrip(renderer: CliRenderer, state: ComposerRenderState): BoxRenderable {
-  const row = new BoxRenderable(renderer, { flexDirection: "row", gap: 2, width: "100%", paddingX: 1 });
+  const row = new BoxRenderable(renderer, { flexDirection: "row", gap: 2, width: "100%", paddingX: 1, flexShrink: 0 });
   const stripFocused = state.focused && state.editor.field === "tabs";
   for (const tab of COMPOSER_TABS) {
     const active = tab === state.editor.tab;
