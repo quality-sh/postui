@@ -19,33 +19,40 @@ References:
   postui borrows the motif, not the image: loaders and reveals are halftone
   glyph fields that "develop" into content.
 
-## 1. Palette (Rosé Pine derived; red is for errors only)
+## 1. Palette — aether-rose (the owner's desktop theme)
+
+postui follows the owner's Omarchy theme, aether-rose
+(`~/.config/aether/theme/colors.toml`, `~/.config/opencode/themes/aether-rose.json`):
+black ground, grey chrome, grey text, one light-grey accent. Rosé Pine
+colours appear only where they carry meaning. Drifting from this (violet
+grounds, a coloured accent) counts as "off theme".
 
 | Token | Hex | Use |
 |---|---|---|
-| `bg` | `#100f17` | app background |
-| `panel` | `#15131e` | pane interiors |
-| `element` | `#1d1a28` | inputs, pills, code gutter, selected-row fill base |
-| `elementHover` | `#252134` | mouse hover on rows and pills |
-| `border` | `#2a2738` | pane frames at rest, rules |
-| `borderActive` | `#45405a` | hover/secondary emphasis on frames |
-| `text` | `#e0def4` | body text |
-| `muted` | `#908caa` | labels, hint text, secondary info |
-| `dim` | `#6e6a86` | de-emphasised decoration, placeholders |
-| `fog` | `#3e3a52` | halftone fog stage, skeletons |
-| `accent` | `#c4a7e7` | THE accent (iris): focus, selection bar, wordmark, cursor, primary buttons |
-| `accentSoft` | `#2a2440` | selected-row / focused-control fill |
+| `bg` | `#000000` | app background |
+| `panel` | `#0a0a0a` | pane interiors |
+| `element` | `#1a1a1a` | inputs, pills, code gutter |
+| `elementHover` | `#242424` | mouse hover on rows and pills |
+| `border` | `#525252` | pane frames at rest, rules |
+| `borderActive` | `#908caa` | hover/secondary emphasis on frames |
+| `text` | `#b9b9b9` | body text |
+| `muted` | `#8b8b8b` | labels, hint text |
+| `dim` | `#6e6a86` | decoration, placeholders, gutters |
+| `fog` | `#2e2e2e` | halftone fog stage, skeletons |
+| `accent` | `#cbcbcb` | focus, selection bar, cursor, primary buttons |
+| `accentSoft` | `#262626` | selected-row / focused-control fill |
 | `gold` | `#f6c177` | JSON strings, warnings |
-| `foam` | `#9ccfd8` | success (2xx), JSON literals, GET |
-| `rose` | `#ebbcba` | PUT/PATCH, warm secondary |
+| `sage` | `#8fa77a` | success (2xx), GET |
+| `iris` | `#c4a7e7` | info, JSON literals |
+| `rose` | `#ebbcba` | PUT/PATCH, the wordmark's warm end |
 | `love` | `#eb6f92` | errors, 4xx/5xx, DELETE — nothing else |
 
-Method badges: GET foam, POST gold, PUT/PATCH rose, DELETE love,
-HEAD/OPTIONS muted. JSON: keys `text`, strings `gold`, literals `foam`,
+Method badges: GET sage, POST gold, PUT/PATCH rose, DELETE love,
+HEAD/OPTIONS muted. JSON: keys `text`, strings `gold`, literals `iris`,
 punctuation `dim`.
 
-Bloom palette (develop effect, wordmark): `#eb6f92 #c4a56a #908caa #ea9a97
-#935e6d` plus `accent`.
+Bloom palette (develop effect): `#eb6f92 #c4a56a #908caa #ea9a97 #935e6d`
+plus `accent`. Wordmark: `accent` fading to `rose`.
 
 ## 2. Shape
 

@@ -6,35 +6,37 @@ import type { JsonTokenKind } from "./json-highlight.ts";
  * option: fg, bg, borderColor, focusedBorderColor, titleColor).
  */
 const COLOR = {
-  /** App background, behind the panes and under the status bar. */
-  bg: "#100f17",
-  /** Pane interiors: one step up from bg. */
-  panel: "#15131e",
-  /** Inputs, pills, the code gutter: one step up from panel. */
-  element: "#1d1a28",
+  /** App background, behind the panes and under the status bar: aether black. */
+  bg: "#000000",
+  /** Pane interiors: a hair above black — aether separates with grey lines, not tints. */
+  panel: "#0a0a0a",
+  /** Inputs, pills, the code gutter (aether's surface). */
+  element: "#1a1a1a",
   /** Mouse hover on rows and pills. */
-  elementHover: "#252134",
-  /** Pane frames at rest, rules, tree guides. */
-  border: "#2a2738",
+  elementHover: "#242424",
+  /** Pane frames at rest, rules, tree guides (aether's border grey). */
+  border: "#525252",
   /** Secondary emphasis on frames (hover, a dialog's inner edge). */
-  borderActive: "#45405a",
+  borderActive: "#908caa",
   /** Body text: names, values, the query, fix-it commands. */
-  text: "#e0def4",
+  text: "#b9b9b9",
   /** Labels, hint text, secondary info. */
-  muted: "#908caa",
+  muted: "#8b8b8b",
   /** De-emphasised decoration and placeholders: the halftone dots, gutters. */
   dim: "#6e6a86",
   /** The halftone fog stage and skeletons. */
-  fog: "#3e3a52",
-  /** THE accent (iris): focus, selection bar, wordmark, cursor, primary buttons. */
-  accent: "#c4a7e7",
+  fog: "#2e2e2e",
+  /** THE accent (light grey): focus, selection bar, cursor, primary buttons. */
+  accent: "#cbcbcb",
   /** Selected-row and focused-control fill under the accent. */
-  accentSoft: "#2a2440",
+  accentSoft: "#262626",
   /** JSON strings, warnings. */
   gold: "#f6c177",
-  /** Success (2xx), JSON literals, GET. */
-  foam: "#9ccfd8",
-  /** PUT/PATCH, warm secondary. */
+  /** Success (2xx), GET. */
+  sage: "#8fa77a",
+  /** Info: JSON literals, links. */
+  iris: "#c4a7e7",
+  /** PUT/PATCH, the wordmark's warm end. */
   rose: "#ebbcba",
   /** Errors, 4xx/5xx, DELETE — nothing else. */
   love: "#eb6f92",
@@ -43,13 +45,14 @@ const COLOR = {
 /**
  * POSTUI TUI palette — the single source of color truth for the TUI.
  *
- * Rosé Pine derived (design/feel-spec.md §1): a violet-black ground in
- * three steps (bg, panel, element), lavender text in three strengths
- * (text, muted, dim), and ONE accent — iris — for everything that says
- * "you are here": focus, the selection bar, the wordmark, the cursor, the
- * primary button. Red (`love`) means an error, a 4xx/5xx, or DELETE, and
- * nothing else. No other TUI module may hardcode a color; import tokens
- * from here.
+ * aether-rose (the owner's Omarchy desktop theme; see
+ * ~/.config/opencode/themes/aether-rose.json and design/feel-spec.md §1):
+ * a black ground, grey chrome and grey text, and ONE light-grey accent for
+ * everything that says "you are here". Rosé Pine colors appear only where
+ * they carry meaning: love = an error, a 4xx/5xx, or DELETE; gold = JSON
+ * strings and warnings; sage = success and GET; iris = info and JSON
+ * literals. No other TUI module may hardcode a color; import tokens from
+ * here.
  */
 export const THEME = {
   color: COLOR,
@@ -64,11 +67,11 @@ export const THEME = {
 export const SCRIM = RGBA.fromInts(0, 0, 0, 150);
 
 /**
- * Method badge colors: GET foam, POST gold, PUT/PATCH rose, DELETE love,
+ * Method badge colors: GET sage, POST gold, PUT/PATCH rose, DELETE love,
  * HEAD/OPTIONS muted. Keys are uppercase.
  */
 const METHOD_COLORS: Readonly<Record<string, string>> = {
-  GET: THEME.color.foam,
+  GET: THEME.color.sage,
   POST: THEME.color.gold,
   PUT: THEME.color.rose,
   PATCH: THEME.color.rose,
@@ -87,15 +90,15 @@ export function methodColor(method: string): string {
 
 /**
  * JSON token kinds to color roles (json-highlight.ts spans carry kinds,
- * never colors): keys in the body text, strings gold, literals foam — so a
+ * never colors): keys in the body text, strings gold, literals iris — so a
  * number never reads as a string — and punctuation dim.
  */
 export const JSON_COLORS: Record<JsonTokenKind, string> = {
   punctuation: THEME.color.dim,
   key: THEME.color.text,
   string: THEME.color.gold,
-  number: THEME.color.foam,
-  boolean: THEME.color.foam,
-  null: THEME.color.foam,
+  number: THEME.color.iris,
+  boolean: THEME.color.iris,
+  null: THEME.color.iris,
   plain: THEME.color.text,
 };

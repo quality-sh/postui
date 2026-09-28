@@ -120,7 +120,7 @@ describe("requestRow", () => {
     expect(selected.indexOf("one")).toBe(plain.indexOf("two"));
   });
 
-  test("method colors: GET foam, POST gold, PUT/PATCH rose, DELETE love, HEAD/OPTIONS muted", async () => {
+  test("method colors: GET sage, POST gold, PUT/PATCH rose, DELETE love, HEAD/OPTIONS muted", async () => {
     const methods = ["POST", "PUT", "PATCH", "DELETE", "GET", "HEAD", "OPTIONS"];
     expect(await badgeColorsMatch(methods)).toEqual(methods.map(() => true));
   });

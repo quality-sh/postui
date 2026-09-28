@@ -67,11 +67,11 @@ export function targetChunks(target: SendTarget | null): TextChunk[] {
   return [bold(fg(methodColor(method))(method)), fg(THEME.color.text)(` ${targetPath(target.url)}`)];
 }
 
-/** The status colour class: foam 2xx, gold 3xx, love 4xx/5xx (red means failure only). */
+/** The status colour class: sage 2xx, gold 3xx, love 4xx/5xx (red means failure only). */
 export function statusColor(status: number): string {
   if (status >= 400) return THEME.color.love;
   if (status >= 300) return THEME.color.gold;
-  if (status >= 200) return THEME.color.foam;
+  if (status >= 200) return THEME.color.sage;
   return THEME.color.text;
 }
 

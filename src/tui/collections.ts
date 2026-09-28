@@ -118,7 +118,13 @@ export function startCollectionsPane(
     state.cursor === null ? undefined : shown()[state.cursor];
   const cursorName = (): string | null => highlighted()?.name ?? null;
 
-  const view = createRowsView(renderer, pane, name => selectRequest(name));
+  // A click opens (never sends: that stays on enter) and pulses the row, so
+  // clicking the request that is already open still visibly lands.
+  const view = createRowsView(renderer, pane, name => {
+    selectRequest(name);
+    view.flash(name, "press");
+    void activateHighlighted(false);
+  });
 
   const lookOf = (rows: readonly FlatRow[], slot: WindowSlot): SlotLook =>
     slot.row.kind === "header"

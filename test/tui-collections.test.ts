@@ -99,7 +99,7 @@ describe("collections pane", () => {
     expect(text).toContain("GET");
   });
 
-  test("method badges take their method colors: POST gold, GET foam", async () => {
+  test("method badges take their method colors: POST gold, GET sage", async () => {
     const setup = await setupCollections({
       "create-user.ts": moduleSource("POST", "https://api.dev/users"),
       "list-users.ts": moduleSource("GET", "https://api.dev/users"),
@@ -108,7 +108,7 @@ describe("collections pane", () => {
     const post = spans.find(span => span.text.trim() === "POST");
     const get = spans.find(span => span.text.trim() === "GET");
     expect(post?.fg.equals(RGBA.fromHex(THEME.color.gold))).toBe(true);
-    expect(get?.fg.equals(RGBA.fromHex(THEME.color.foam))).toBe(true);
+    expect(get?.fg.equals(RGBA.fromHex(THEME.color.sage))).toBe(true);
   });
 
   test("the first listing places the highlight on the first request, mockup-style", async () => {
@@ -208,9 +208,9 @@ describe("collections pane", () => {
     const text = frameText(setup, HEIGHT);
     expect(text).toContain("Health"); // regrouped after the URL edit
     expect(text).not.toContain("Users");
-    const foam = RGBA.fromHex(THEME.color.foam);
+    const sage = RGBA.fromHex(THEME.color.sage);
     const get = flatSpans(setup).find(span => span.text.trim() === "GET");
-    expect(get?.fg.equals(foam)).toBe(true);
+    expect(get?.fg.equals(sage)).toBe(true);
   });
 
   test("refresh-on-focus also re-reads the open request into the composer", async () => {

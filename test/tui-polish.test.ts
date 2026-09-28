@@ -47,7 +47,7 @@ describe("visual polish", () => {
     // composer: same structure (main line + dim way out)
     const composerEmpty = spans.find(span => span.text.includes("no request loaded"));
     expect(composerEmpty?.fg.equals(muted)).toBe(true);
-    const composerHint = spans.find(span => span.text.includes("select one in collections"));
+    const composerHint = spans.find(span => span.text.includes("click a request in collections"));
     expect(composerHint?.fg.equals(dim)).toBe(true);
 
     // response idle: same structure again

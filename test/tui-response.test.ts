@@ -65,14 +65,14 @@ describe("response pane", () => {
     server.close();
   });
 
-  test("the status line colors success codes foam and shows latency and size", async () => {
+  test("the status line colors success codes sage and shows latency and size", async () => {
     const server = serve(() => new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const app = await setupApp({ "ok.ts": moduleSource("GET", server.url("/")) });
     await sendFromApp(app);
-    const foam = RGBA.fromHex(THEME.color.foam);
+    const sage = RGBA.fromHex(THEME.color.sage);
     const spans = app.captureSpans().lines.flatMap(line => line.spans);
     const status = spans.find(span => span.text.includes("200 OK"));
-    expect(status?.fg.equals(foam)).toBe(true);
+    expect(status?.fg.equals(sage)).toBe(true);
     const text = frameText(app, HEIGHT);
     expect(text).toMatch(/\d+ ms/);
     expect(text).toContain("11 B"); // exact byte size of {"ok":true}

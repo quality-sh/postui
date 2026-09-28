@@ -50,8 +50,22 @@ describe("mouse interactivity", () => {
     await app.mockMouse.click(5, betaRow);
     await app.flush();
     await app.renderOnce();
-    expect(rowOf(app, "beta-check") ?? "").toContain("▌");
+    expect(rowOf(app, "POST  beta-check") ?? "").toContain("▌");
     expect(rowOf(app, "alpha-check") ?? "").not.toContain("▌");
+  });
+
+  test("clicking a request row opens it in the composer, without sending", async () => {
+    const app = await setupApp({
+      "alpha-check.ts": moduleSource("GET", "http://never-reached.test/alpha"),
+      "beta-check.ts": moduleSource("GET", "http://never-reached.test/beta"),
+    });
+    await app.mockMouse.click(5, rowIndexOf(app, "beta-check"));
+    await app.flush();
+    await app.shell.collections.settled();
+    await app.renderOnce();
+    expect(app.shell.composer.loadedName).toBe("beta-check");
+    expect(frameText(app, HEIGHT)).toContain("http://never-reached.test/beta");
+    expect(rowOf(app, "no response yet")).not.toBeNull(); // opened, not sent
   });
 
   test("clicking a pane focuses it (border treatment follows)", async () => {
@@ -92,7 +106,7 @@ describe("mouse interactivity", () => {
     await app.shell.collections.settled();
     await app.renderOnce();
     expect(app.shell.focus.focused).toBe("collections");
-    expect(rowOf(app, "beta-check") ?? "").toContain("▌");
+    expect(rowOf(app, "GET   beta-check") ?? "").toContain("▌");
   });
 });
 

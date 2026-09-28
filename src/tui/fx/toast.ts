@@ -18,7 +18,7 @@ const REVEAL_MS = 180;
 const MAX_TOASTS = 3;
 
 const VARIANTS: Record<ToastVariant, { readonly color: string; readonly mark: string }> = {
-  success: { color: FX.foam, mark: "✓" },
+  success: { color: FX.sage, mark: "✓" },
   error: { color: FX.love, mark: "✗" },
   info: { color: FX.accent, mark: "•" },
 };

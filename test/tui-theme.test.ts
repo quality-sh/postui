@@ -14,15 +14,15 @@ describe("THEME", () => {
     for (const color of THEME.bloom) expect(isHex(color)).toBe(true);
   });
 
-  test("palette follows the feel spec: violet-black ground, iris accent, love for errors", () => {
-    expect(THEME.color.bg).toBe("#100f17");
-    expect(THEME.color.panel).toBe("#15131e");
-    expect(THEME.color.element).toBe("#1d1a28");
-    expect(THEME.color.text).toBe("#e0def4");
-    expect(THEME.color.muted).toBe("#908caa");
-    expect(THEME.color.accent).toBe("#c4a7e7");
-    expect(THEME.color.accentSoft).toBe("#2a2440");
+  test("palette follows aether-rose: black ground, grey chrome and accent, love for errors", () => {
+    expect(THEME.color.bg).toBe("#000000");
+    expect(THEME.color.element).toBe("#1a1a1a");
+    expect(THEME.color.border).toBe("#525252");
+    expect(THEME.color.text).toBe("#b9b9b9");
+    expect(THEME.color.accent).toBe("#cbcbcb");
     expect(THEME.color.love).toBe("#eb6f92");
+    expect(THEME.color.sage).toBe("#8fa77a");
+    expect(THEME.color.iris).toBe("#c4a7e7");
   });
 
   test("the accent is not a red: love is the only token in the error color", () => {
@@ -42,8 +42,8 @@ describe("THEME", () => {
 });
 
 describe("methodColor", () => {
-  test("GET foam, POST gold, PUT/PATCH rose, DELETE love, HEAD/OPTIONS muted", () => {
-    expect(methodColor("GET")).toBe(THEME.color.foam);
+  test("GET sage, POST gold, PUT/PATCH rose, DELETE love, HEAD/OPTIONS muted", () => {
+    expect(methodColor("GET")).toBe(THEME.color.sage);
     expect(methodColor("POST")).toBe(THEME.color.gold);
     expect(methodColor("PUT")).toBe(THEME.color.rose);
     expect(methodColor("PATCH")).toBe(THEME.color.rose);
@@ -59,12 +59,12 @@ describe("methodColor", () => {
 });
 
 describe("JSON_COLORS", () => {
-  test("keys in text, strings gold, literals foam, punctuation dim", () => {
+  test("keys in text, strings gold, literals iris, punctuation dim", () => {
     expect(JSON_COLORS.key).toBe(THEME.color.text);
     expect(JSON_COLORS.string).toBe(THEME.color.gold);
-    expect(JSON_COLORS.number).toBe(THEME.color.foam);
-    expect(JSON_COLORS.boolean).toBe(THEME.color.foam);
-    expect(JSON_COLORS.null).toBe(THEME.color.foam);
+    expect(JSON_COLORS.number).toBe(THEME.color.iris);
+    expect(JSON_COLORS.boolean).toBe(THEME.color.iris);
+    expect(JSON_COLORS.null).toBe(THEME.color.iris);
     expect(JSON_COLORS.punctuation).toBe(THEME.color.dim);
   });
 });

@@ -68,9 +68,9 @@ describe("response body", () => {
     close();
   });
 
-  test("tokens are colored by kind: strings gold, keys body text, literals foam, punctuation dim", async () => {
+  test("tokens are colored by kind: strings gold, keys body text, literals iris, punctuation dim", async () => {
     const gold = RGBA.fromHex(THEME.color.gold);
-    const literal = RGBA.fromHex(THEME.color.foam);
+    const literal = RGBA.fromHex(THEME.color.iris);
     const text = RGBA.fromHex(THEME.color.text);
     const punct = RGBA.fromHex(THEME.color.dim);
     const object = await sendBody(`{"s":"str","n":42}`);
@@ -165,9 +165,9 @@ describe("response header", () => {
     close();
   });
 
-  test("the status is colored by class: success foam, errors love", async () => {
+  test("the status is colored by class: success sage, errors love", async () => {
     const ok = await sendBody("{}", { status: 200 });
-    expect(colorOf(ok.app, "200 OK")?.equals(RGBA.fromHex(THEME.color.foam))).toBe(true);
+    expect(colorOf(ok.app, "200 OK")?.equals(RGBA.fromHex(THEME.color.sage))).toBe(true);
     ok.close();
     const failed = await sendBody("{}", { status: 503 });
     expect(colorOf(failed.app, "503 SERVICE UNAVAILABLE")?.equals(RGBA.fromHex(THEME.color.love))).toBe(true);

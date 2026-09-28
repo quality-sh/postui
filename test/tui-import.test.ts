@@ -71,16 +71,19 @@ describe("import keys", () => {
 describe("import prompt", () => {
   test("the prompt is a rounded dialog a quarter of the way down, over a dimming scrim", async () => {
     const app = await setupApp();
-    const bgBefore = app.captureSpans().lines.at(-1)?.spans[0]?.bg;
+    // The header sits on `panel`; the app's black `bg` would not show a dim.
+    const headerBg = (): RGBA | undefined =>
+      app.captureSpans().lines[1]?.spans.find(span => span.text.includes("P"))?.bg;
+    const bgBefore = headerBg();
     await openImport(app);
     const rows = frameText(app, HEIGHT).split("\n");
     const top = rows.findIndex(line => line.includes("╭─IMPORT CURL"));
     expect(top).toBe(Math.round(HEIGHT / 4));
     expect(rows.some(line => /╰─+╯/.test(line.slice(line.indexOf("╰"))))).toBe(true);
-    // The status bar under the scrim is darker than it was: the scrim dims it.
-    const bgAfter = app.captureSpans().lines.at(-1)?.spans[0]?.bg;
-    expect(bgBefore?.equals(RGBA.fromHex(THEME.color.bg))).toBe(true);
-    expect(bgAfter?.equals(RGBA.fromHex(THEME.color.bg))).toBe(false);
+    // The header under the scrim is darker than it was: the scrim dims it.
+    const bgAfter = headerBg();
+    expect(bgBefore?.equals(RGBA.fromHex(THEME.color.panel))).toBe(true);
+    expect(bgAfter?.equals(RGBA.fromHex(THEME.color.panel))).toBe(false);
     // The dialog itself is the accent-framed panel: it holds the keys.
     const corner = app.captureSpans().lines[top]?.spans.find(span => span.text.includes("╭"));
     expect(corner?.fg.equals(RGBA.fromHex(THEME.color.accent))).toBe(true);

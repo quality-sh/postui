@@ -17,9 +17,9 @@ const KIND_COLORS: Record<JsonTokenKind, string> = {
   punctuation: FX.dim,
   key: FX.text,
   string: FX.gold,
-  number: FX.foam,
-  boolean: FX.foam,
-  null: FX.foam,
+  number: FX.iris,
+  boolean: FX.iris,
+  null: FX.iris,
   plain: FX.text,
 };
 

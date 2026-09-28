@@ -3,9 +3,7 @@
 
 export const request = {
   method: "GET",
-  url: "http://127.0.0.1:8971/ping",
-  headers: {
-    "Authorization": "Bearer $API_TOKEN",
-  },
+  url: "https://httpbin.org/delay/2",
+  headers: {},
   body: null,
 };

@@ -87,7 +87,7 @@ export function renderComposerPane(renderer: CliRenderer, pane: BoxRenderable, s
     // The one shared empty-state style: what is missing plus the way out.
     renderEmptyState(renderer, pane, [
       { text: "no request loaded", tone: "message" },
-      { text: "select one in collections (⏎)", tone: "hint" },
+      { text: "click a request in collections, or ↑↓ and ⏎", tone: "hint" },
     ]);
     return;
   }

@@ -3,7 +3,7 @@
 
 export const request = {
   method: "GET",
-  url: "http://127.0.0.1:8971/health",
+  url: "https://httpbin.org/status/418",
   headers: {},
   body: null,
 };

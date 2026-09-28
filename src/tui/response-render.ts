@@ -14,7 +14,7 @@ import { THEME } from "./theme.ts";
 
 /**
  * Response pane rendering: the mockup's status line (status code colored —
- * foam for success, love for 4xx/5xx and failed sends — plus latency and
+ * sage for success, love for 4xx/5xx and failed sends — plus latency and
  * size, stamped `#N · HH:MM:SS`), BODY/HEADERS/TESTS tabs, the body as
  * pretty-printed, colored JSON in a line-numbered block, and the
  * diagnostic region. While a send runs: a busy header and skeleton fog.
