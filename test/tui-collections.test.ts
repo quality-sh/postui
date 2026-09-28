@@ -91,18 +91,18 @@ describe("collections pane", () => {
     expect(text).toContain("GET");
   });
 
-  test("POST badges are painted in the accent; GET badges muted", async () => {
+  test("POST badges are painted in the accent; GET badges green, per the mockup", async () => {
     const setup = await setupCollections({
       "create-user.ts": moduleSource("POST", "https://api.dev/users"),
       "list-users.ts": moduleSource("GET", "https://api.dev/users"),
     });
     const accent = RGBA.fromHex(THEME.color.accent);
-    const dim = RGBA.fromHex(THEME.color.dim);
+    const safe = RGBA.fromHex(THEME.color.safe);
     const spans = flatSpans(setup);
     const post = spans.find(span => span.text.trim() === "POST");
     const get = spans.find(span => span.text.trim() === "GET");
     expect(post?.fg.equals(accent)).toBe(true);
-    expect(get?.fg.equals(dim)).toBe(true);
+    expect(get?.fg.equals(safe)).toBe(true);
   });
 
   test("the first listing places the highlight on the first request, mockup-style", async () => {
@@ -146,6 +146,22 @@ describe("collections pane", () => {
     expect(marker?.fg.equals(accent)).toBe(true);
   });
 
+  test("only the selected row is boxed; the others hang off the tree guide", async () => {
+    const setup = await setupCollections({
+      "one.ts": moduleSource("POST", "https://api.dev/users"),
+      "three.ts": moduleSource("GET", "https://api.dev/users"),
+      "two.ts": moduleSource("GET", "https://api.dev/users"),
+    });
+    // The collections pane is the frame's first 30 columns; inside its
+    // border, exactly one box top — the selection's — may appear.
+    const paneLines = frameText(setup, HEIGHT)
+      .split("\n")
+      .map(line => line.slice(1, 29));
+    expect(paneLines.filter(line => line.includes("┌"))).toHaveLength(1);
+    expect(rowContaining(setup, "▶")).toContain("▶│ POST  one");
+    expect(rowContaining(setup, "three")).toContain("├ GET   three");
+  });
+
   test("enter loads the selected request into the composer and sends it, focus staying put", async () => {
     const hits: string[] = [];
     const server = Bun.serve({
@@ -186,9 +202,9 @@ describe("collections pane", () => {
     const text = frameText(setup, HEIGHT);
     expect(text).toContain("Health"); // regrouped after the URL edit
     expect(text).not.toContain("Users");
-    const dim = RGBA.fromHex(THEME.color.dim);
+    const safe = RGBA.fromHex(THEME.color.safe);
     const get = flatSpans(setup).find(span => span.text.trim() === "GET");
-    expect(get?.fg.equals(dim)).toBe(true);
+    expect(get?.fg.equals(safe)).toBe(true);
   });
 
   test("refresh-on-focus also re-reads the open request into the composer", async () => {

@@ -2,13 +2,38 @@ import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/co
 import type { CliRenderer } from "@opentui/core";
 import type { LoadedRequest } from "../gen/load.ts";
 import { isMutatingMethod } from "./collection-groups.ts";
+import type { FlatRow } from "./collections-rows.ts";
 import { errorName, namedErrorText, renderEmptyState } from "./render.ts";
 import { THEME } from "./theme.ts";
 
-/** One text line plus the selection box's top/bottom border. */
+/**
+ * Every request row is three terminal rows tall — the selection box's
+ * border plus its text — selected or not, so the layout never shifts when
+ * the selection moves and the pane's window math stays one constant.
+ * Unselected rows spend the extra rows on the tree guide.
+ */
 export const REQUEST_ROW_HEIGHT = 3;
-// Pane inner width 28 - marker (2) - method column (6), minus slack.
-const MAX_NAME_CHARS = 18;
+// Inside the selection box: pane inner width 28 - marker column (1) - box
+// borders (2) - padding (1) - method column (6) leaves 18 cells, the
+// ellipsis included.
+const MAX_NAME_CHARS = 17;
+
+/**
+ * Where a request row sits under its collection header: `middle` rows draw
+ * `├` and carry the guide on down, the `last` row closes it with `└`, and
+ * `none` (the flat search-match list, which has no headers) draws no guide.
+ */
+export type TreeBranch = "middle" | "last" | "none";
+
+/**
+ * The branch for the flattened row at `rowIndex`: `last` when no request of
+ * the same group follows it, `none` when the layout has no group headers at
+ * all. Pure over the pane's row layout.
+ */
+export function treeBranch(rows: readonly FlatRow[], rowIndex: number): TreeBranch {
+  if (!rows.some(row => row.kind === "header")) return "none";
+  return rows[rowIndex + 1]?.kind === "request" ? "middle" : "last";
+}
 
 /**
  * The pane's empty state, in the one shared style: what is missing plus the
@@ -67,12 +92,21 @@ export function headerRow(renderer: CliRenderer, title: string): TextRenderable 
   });
 }
 
+/** The guide glyphs of one unselected row's three terminal rows. */
+const GUIDES: Record<TreeBranch, { readonly above: string; readonly at: string; readonly below: string }> = {
+  middle: { above: "│", at: "├ ", below: "│" },
+  last: { above: "│", at: "└ ", below: " " },
+  none: { above: " ", at: "  ", below: " " },
+};
+
 /**
- * One request row: method badge plus module name. The selected row carries
- * the mockup's filled selection bar — a border in the accent color drawn
- * around the row (the same treatment panes use for focus) — with the "▶"
- * marker; at rest the border is painted in the background color so the
- * layout never shifts when the selection moves.
+ * One request row, per the mockup: only the SELECTED row is boxed — an
+ * accent border around method badge and name, with the "▶" marker outside
+ * the box on its left — while every other row is drawn plain, hanging off
+ * the collection's tree guide (`├` / `└`) in the box's left-border column.
+ * The selected row's box is the returned renderable, so the pane's border
+ * sweep lands on it. Methods keep their colors: mutating ones in the
+ * accent, safe ones green.
  *
  * With `onSelect`, a left click anywhere on the row selects it (the event
  * bubbles from the row's text up to this box, so the whole 3-row strip is
@@ -83,13 +117,16 @@ export function requestRow(
   request: LoadedRequest,
   selected: boolean,
   onSelect?: (request: LoadedRequest) => void,
+  branch: TreeBranch = "middle",
 ): BoxRenderable {
+  // One column in from the pane edge: the marker column, left of the box.
+  // (OpenTUI turns the border on whenever a border color is given, so the
+  // color goes to the selected row only.)
   const row = new BoxRenderable(renderer, {
-    width: "100%",
     height: REQUEST_ROW_HEIGHT,
-    border: true,
-    borderColor: selected ? THEME.color.accent : THEME.color.bg,
+    marginLeft: 1,
     backgroundColor: THEME.color.bg,
+    ...(selected ? { border: true, borderColor: THEME.color.accent } : {}),
   });
   if (onSelect !== undefined) {
     row.onMouseDown = (event) => {
@@ -98,14 +135,34 @@ export function requestRow(
     };
   }
   const method = request.request.method.toUpperCase();
+  const label = [
+    bold(fg(isMutatingMethod(method) ? THEME.color.accent : THEME.color.safe)(method.padEnd(6))),
+    fg(selected ? THEME.color.bright : THEME.color.text)(displayName(request.name)),
+  ];
+  if (selected) {
+    // The leading space lines the badge up with the unselected rows' badges.
+    row.add(new TextRenderable(renderer, { content: new StyledText([fg(THEME.color.bg)(" "), ...label]) }));
+    // The marker sits in the margin column, on the text row: positioned
+    // out of the box (the pane does not clip overflow).
+    row.add(
+      new TextRenderable(renderer, {
+        content: new StyledText([bold(fg(THEME.color.accent)("▶"))]),
+        position: "absolute",
+        left: -2,
+        top: 0,
+      }),
+    );
+    return row;
+  }
+  // The guide runs through all three rows: in from above, the branch at the
+  // label, and on down to the next sibling unless this row closes the group.
+  const guide = GUIDES[branch];
   row.add(
     new TextRenderable(renderer, {
       content: new StyledText([
-        fg(selected ? THEME.color.accent : THEME.color.bg)(selected ? "▶ " : "  "),
-        bold(fg(isMutatingMethod(method) ? THEME.color.accent : THEME.color.dim)(
-          method.padEnd(6),
-        )),
-        fg(selected ? THEME.color.bright : THEME.color.text)(displayName(request.name)),
+        fg(THEME.color.border)(`${guide.above}\n${guide.at}`),
+        ...label,
+        fg(THEME.color.border)(`\n${guide.below}`),
       ]),
     }),
   );

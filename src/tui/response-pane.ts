@@ -1,5 +1,5 @@
 import { BoxRenderable, ScrollBoxRenderable } from "@opentui/core";
-import type { CliRenderer } from "@opentui/core";
+import type { CliRenderer, Renderable } from "@opentui/core";
 import { readdir } from "node:fs/promises";
 import { DEFAULT_BODY_WINDOW } from "../send/response.ts";
 import type { SendResult } from "../send/send.ts";
@@ -142,7 +142,9 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
     renderResponsePane(renderer, pane, renderState);
     // Only a result can outgrow the pane; the idle/sending/error states are
     // short and center themselves, which a scroll region would undo.
-    if (state.view.kind === "result") scrollArea = scrollContent(renderer, pane);
+    // A JSON body brings its own scrolling code block; nesting it in a second
+    // scroll box would collapse it, so the keys drive that block instead.
+    if (state.view.kind === "result") scrollArea = innerScroll(pane) ?? scrollContent(renderer, pane);
   };
 
   /** Fresh tests listing for the current request; re-renders when done. */
@@ -249,6 +251,16 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
     },
     settled: () => tail,
   };
+}
+
+/** The first scroll box already rendered under the pane, if any. */
+function innerScroll(node: Renderable): ScrollBoxRenderable | null {
+  for (const child of node.getChildren()) {
+    if (child instanceof ScrollBoxRenderable) return child;
+    const found = innerScroll(child);
+    if (found !== null) return found;
+  }
+  return null;
 }
 
 /**

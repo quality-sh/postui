@@ -2,13 +2,17 @@ import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/co
 import type { CliRenderer, TextChunk } from "@opentui/core";
 import { scrubSecrets } from "../send/redact.ts";
 import type { SendResult } from "../send/send.ts";
-import { errorLine, emptyStateBox, numberedLines, renderEmptyState, tabsRow } from "./render.ts";
+import { codeBlock } from "./code-block.ts";
+import { highlightJson } from "./json-highlight.ts";
+import type { HighlightedJson } from "./json-highlight.ts";
+import { errorLine, emptyStateBox, renderEmptyState, tabsRow } from "./render.ts";
 import { THEME } from "./theme.ts";
 
 /**
  * Response pane rendering: the mockup's status line (status code colored —
  * gold for success, the accent red for errors — plus latency and size),
- * BODY/HEADERS/TESTS tabs, and the diagnostic region.
+ * BODY/HEADERS/TESTS tabs, the body as pretty-printed, colored JSON in a
+ * line-numbered block, and the diagnostic region.
  *
  * REDACTION: every text derived from a send is scrubbed against that send's
  * resolved env values before it is placed in the pane — the same final pass
@@ -44,7 +48,8 @@ export function renderResponsePane(
   pane: BoxRenderable,
   state: ResponseRenderState,
 ): void {
-  pane.add(statusRow(renderer, state));
+  const status = statusLine(renderer, pane, state);
+  if (status !== null) pane.add(status);
   pane.add(tabsRow(renderer, RESPONSE_TABS, tabIndexOf(state.tab), THEME.color.gold));
 
   if (state.view.kind === "result") {
@@ -112,36 +117,64 @@ function tabIndexOf(tab: "body" | "headers" | "tests"): number {
   return 2;
 }
 
-/** Status/latency/size on the right, per the mockup; error marker when one sits. */
-function statusRow(renderer: CliRenderer, state: ResponseRenderState): BoxRenderable {
+/**
+ * The mockup's header row — `RESPONSE   201 CREATED │ 184 ms │ 642 B`, the
+ * label on the left and the status on the right of ONE row. When the pane's
+ * border already carries the RESPONSE title, the status goes up onto that
+ * same border row, right-aligned (positioned into it: the pane does not
+ * clip overflow), and costs the body no row. A pane without a bordered
+ * title gets label and status as an ordinary first row instead.
+ */
+function statusLine(
+  renderer: CliRenderer,
+  pane: BoxRenderable,
+  state: ResponseRenderState,
+): TextRenderable | BoxRenderable | null {
+  const chunks = statusChunks(state);
+  if (hasBorderTitle(pane)) {
+    if (chunks.length === 0) return null;
+    return new TextRenderable(renderer, {
+      content: new StyledText([fg(THEME.color.text)(" "), ...chunks, fg(THEME.color.text)(" ")]),
+      // An opaque background: the spaces must blank the border line under them.
+      bg: THEME.color.bg,
+      position: "absolute",
+      top: -1,
+      right: 1,
+    });
+  }
   const row = new BoxRenderable(renderer, {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
     width: "100%",
   });
+  row.add(new TextRenderable(renderer, { content: new StyledText([bold(fg(THEME.color.bright)("RESPONSE"))]) }));
+  if (chunks.length > 0) row.add(new TextRenderable(renderer, { content: new StyledText(chunks) }));
+  return row;
+}
+
+/** True when the pane draws a titled top border (the title renders on it). */
+function hasBorderTitle(pane: BoxRenderable): boolean {
+  const { border } = pane;
+  const top = border === true || (Array.isArray(border) && border.includes("top"));
+  return top && (pane.title ?? "") !== "";
+}
+
+/** Status, latency and size (or the sending / error marker); empty when idle. */
+function statusChunks(state: ResponseRenderState): TextChunk[] {
   if (state.view.kind === "result") {
     const { outcome } = state.view.result;
-    row.add(
-      new TextRenderable(renderer, {
-        content: new StyledText([
-          statusChunk(outcome.status),
-          dim("  │  "),
-          dim(`${Math.max(1, Math.round(state.view.latencyMs))} ms`),
-          dim("  │  "),
-          dim(formatBytes(outcome.response.size)),
-        ]),
-      }),
-    );
-  } else if (state.view.kind === "error") {
-    row.add(
-      new TextRenderable(renderer, {
-        content: new StyledText([bold(fg(THEME.color.accent)("✗ error"))]),
-      }),
-    );
-  } else if (state.view.kind === "sending") {
-    row.add(new TextRenderable(renderer, { content: new StyledText([dim("sending…")]) }));
+    const rule = fg(THEME.color.border)(" │ ");
+    return [
+      statusChunk(outcome.status),
+      rule,
+      fg(THEME.color.text)(`${Math.max(1, Math.round(state.view.latencyMs))} ms`),
+      rule,
+      fg(THEME.color.text)(formatBytes(outcome.response.size)),
+    ];
   }
-  return row;
+  if (state.view.kind === "error") return [bold(fg(THEME.color.accent)("✗ error"))];
+  if (state.view.kind === "sending") return [dim("sending…")];
+  return [];
 }
 
 function statusChunk(status: number): TextChunk {
@@ -207,16 +240,24 @@ function tabView(
   return testsView(renderer, state);
 }
 
-/** The bounded body digest: window note plus the line-numbered excerpt. */
+/**
+ * The bounded body digest: window note plus the line-numbered excerpt —
+ * JSON pretty-printed and colored by token kind; anything else as its own
+ * lines. A truncated excerpt that no longer parses as a whole is laid out up
+ * to the cut (the note says where the window ends); one that is not JSON
+ * at all shows raw.
+ */
 function bodyView(
   renderer: CliRenderer,
   state: ResponseRenderState,
   result: SendResult,
   secrets: string[],
-): TextRenderable[] {
+): (TextRenderable | BoxRenderable)[] {
   const { response } = result.outcome;
-  // Scrub before splitting or numbering: a secret spanning a line break is
-  // still one contiguous string here, so the marker replaces all of it.
+  // Scrub before splitting, formatting, or numbering: a secret spanning a
+  // line break (or two JSON tokens) is still one contiguous string here, so
+  // the marker replaces all of it. The formatter never decodes escapes, so
+  // nothing it prints can reassemble a scrubbed value.
   const excerpt = scrubSecrets(response.excerpt, secrets);
   let note: string;
   if (response.excerpt === "") {
@@ -226,10 +267,19 @@ function bodyView(
   } else {
     note = `${response.shape} · ${response.size} bytes (complete)`;
   }
-  return [
-    new TextRenderable(renderer, { content: note, fg: THEME.color.dim, width: "100%" }),
-    ...(response.excerpt === "" ? [] : numberedLines(renderer, excerpt, THEME.color.gold)),
-  ];
+  const noteText = new TextRenderable(renderer, { content: note, fg: THEME.color.dim, width: "100%" });
+  if (response.excerpt === "") return [noteText];
+  return [noteText, codeBlock(renderer, highlighted(excerpt, response.truncated))];
+}
+
+/** The last layout, reused while the excerpt is unchanged (tab flips re-render). */
+let lastLayout: { text: string; truncated: boolean; result: HighlightedJson } | null = null;
+
+function highlighted(text: string, truncated: boolean): HighlightedJson {
+  if (lastLayout?.text !== text || lastLayout.truncated !== truncated) {
+    lastLayout = { text, truncated, result: highlightJson(text, { truncated }) };
+  }
+  return lastLayout.result;
 }
 
 /** Response headers as captured by the pipeline: credential values already [redacted]. */

@@ -141,7 +141,10 @@ describe("response pane", () => {
 
   test("+ widens the body window by re-sending through the pipeline", async () => {
     const tail = "tail-marker-4f21";
-    const big = JSON.stringify({ pad: "x".repeat(400), tail });
+    // The padding is whitespace between JSON tokens: it pushes the tail past
+    // the default window, and the pretty layout drops it, so the widened
+    // body fits the pane without scrolling.
+    const big = `{${" ".repeat(400)}"tail":"${tail}"}`;
     let hits = 0;
     const server = serve(() => {
       hits += 1;

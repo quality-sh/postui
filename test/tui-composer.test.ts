@@ -95,7 +95,7 @@ describe("composer pane", () => {
     expect(text).toContain("201 CREATED"); // gold per theme for success codes
     expect(text).toMatch(/\d+ ms/); // latency
     expect(text).toContain("11 B"); // size (bytes)
-    expect(text).toContain('{"ok":true}'); // the bounded body digest
+    expect(text).toContain('"ok": true'); // the bounded body digest, pretty-printed
     expect(text).toContain("(complete)"); // within the default window
     server.close();
   });
@@ -154,7 +154,7 @@ describe("composer pane", () => {
     let hits = 0;
     const server = serve(async () => {
       hits += 1;
-      await Bun.sleep(80);
+      await Bun.sleep(400);
       return new Response("{}", { status: 200 });
     });
     const app = await setupApp({

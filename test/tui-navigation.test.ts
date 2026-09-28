@@ -68,7 +68,7 @@ describe("enter sends from collections in one step", () => {
     expect(app.shell.composer.loadedName).toBe("alpha-check");
     expect(server.hits).toEqual(["/alpha"]);
     expect(rowContaining(app, "200 OK")).not.toBeNull();
-    expect(rowContaining(app, '{"path":"/alpha"}')).not.toBeNull();
+    expect(rowContaining(app, '"path": "/alpha"')).not.toBeNull();
     expect(app.shell.focus.focused).toBe(COLLECTIONS_PANE_ID);
     server.close();
   });
@@ -85,7 +85,7 @@ describe("enter sends from collections in one step", () => {
     await enterFromCollections(app);
     expect(server.hits).toEqual(["/alpha", "/beta"]);
     expect(app.shell.composer.loadedName).toBe("beta-check");
-    expect(rowContaining(app, '{"path":"/beta"}')).not.toBeNull();
+    expect(rowContaining(app, '"path": "/beta"')).not.toBeNull();
     expect(app.shell.focus.focused).toBe(COLLECTIONS_PANE_ID);
     server.close();
   });
