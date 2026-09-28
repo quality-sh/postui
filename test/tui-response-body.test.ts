@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { TUI_BODY_WINDOW } from "../src/tui/response-pane.ts";
 import { RGBA } from "@opentui/core";
 import {
   focusComposer,
@@ -88,11 +89,11 @@ describe("response body", () => {
   });
 
   test("a truncated JSON excerpt is laid out up to the cut, with the truncation note", async () => {
-    // Whitespace between tokens pushes the rest past the 256-byte window.
-    const body = `{"id":"usr_01",${" ".repeat(300)}"after":"cut-away-9d2"}`;
+    // Whitespace between tokens pushes the rest past the TUI's 64 KiB window.
+    const body = `{"id":"usr_01",${" ".repeat(TUI_BODY_WINDOW + 300)}"after":"cut-away-9d2"}`;
     const { app, close } = await sendBody(body);
     const text = frameText(app, HEIGHT);
-    expect(text).toContain("showing first 256 of"); // the note survives
+    expect(text).toContain(`showing first ${TUI_BODY_WINDOW} of`); // the note survives
     expect(rowContaining(app, "1  {")).not.toBeNull();
     expect(rowContaining(app, "2    \"id\": \"usr_01\",")).not.toBeNull();
     expect(colorOf(app, "…")?.equals(RGBA.fromHex(THEME.color.dim))).toBe(true); // the cut marker
@@ -101,7 +102,7 @@ describe("response body", () => {
   });
 
   test("a cut inside a string keeps the partial string, colored as a string", async () => {
-    const { app, close } = await sendBody(JSON.stringify({ pad: "p".repeat(400) }));
+    const { app, close } = await sendBody(JSON.stringify({ pad: "p".repeat(TUI_BODY_WINDOW + 400) }));
     expect(rowContaining(app, "2    \"pad\": \"ppp")).not.toBeNull();
     const cut = flatSpans(app).find(span => span.text.startsWith("\"ppp"));
     expect(cut?.fg.equals(RGBA.fromHex(THEME.color.gold))).toBe(true);

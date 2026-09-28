@@ -2,9 +2,10 @@ import { BoxRenderable } from "@opentui/core";
 import type { CliRenderer, MouseEvent, Renderable } from "@opentui/core";
 import type { LoadedRequest } from "../gen/load.ts";
 import { acknowledgeKey, snapshotOf, sweepFocusIn } from "./composer-ack.ts";
+import { prettyBody } from "./composer-body.ts";
 import type { RevealTarget } from "./composer-ack.ts";
 import { editorKey, isEditingText, loadDraft, newEditorState } from "./composer-editor.ts";
-import type { ComposerField, EditorEffect } from "./composer-editor.ts";
+import type { ComposerField, ComposerTab, EditorEffect } from "./composer-editor.ts";
 import { createComposerFx } from "./composer-fx.ts";
 import { detachLive } from "./composer-mount.ts";
 import type { DevelopPart } from "./composer-mount.ts";
@@ -12,6 +13,7 @@ import { renderComposerPane } from "./composer-render.ts";
 import { draftKey, isDirty, runSave, runSend } from "./composer-run.ts";
 import type { ComposerState, RunContext, SendDiagnostics } from "./composer-run.ts";
 import { draftOf, sendDraft } from "./composer-send.ts";
+import type { RequestDraft } from "./composer-send.ts";
 import type { ComposerKey } from "./composer-text.ts";
 import { fxClock } from "./fx/clock.ts";
 import { clearChildren } from "./render.ts";
@@ -131,6 +133,7 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
       hoverable: (box, target) => hoverables.set(box, target),
       live: state.live,
       onSendClick: () => void send(),
+      onTabClick: tab => selectTab(tab),
     });
   };
 
@@ -209,6 +212,17 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     return true;
   };
 
+  /** A click on a tab: the same switch (and acknowledgement) as ←/→ on the strip. */
+  const selectTab = (tab: ComposerTab): void => {
+    if (editor.draft === null) return;
+    const before = snapshotOf(editor);
+    editor.field = "tabs";
+    editor.tab = tab;
+    state.message = null;
+    startReveal(acknowledgeKey(fx, before, editor, { name: "click", ctrl: false }));
+    render();
+  };
+
   const handleKey = (key: ComposerKey): boolean => {
     if (key.ctrl && key.name === "c") return false; // ctrl+c stays a shell-level quit
     const before = snapshotOf(editor);
@@ -225,7 +239,7 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
   const load = (request: LoadedRequest): void => {
     const sameRequest = state.request?.name === request.name;
     state.request = request;
-    const draft = draftOf(request);
+    const draft = readableDraft(draftOf(request));
     loadDraft(editor, draft, sameRequest);
     state.baseline = draftKey(draft);
     if (!sameRequest) {
@@ -271,4 +285,15 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     },
     settled: () => tail,
   };
+}
+
+/**
+ * The draft as the editor shows it: a one-line JSON body opens laid out.
+ * The laid-out text becomes the baseline too, so opening never reads as an
+ * edit; the send and a ctrl+s carry what the editor shows.
+ */
+function readableDraft(draft: RequestDraft): RequestDraft {
+  if (typeof draft.body !== "string") return draft;
+  const pretty = prettyBody(draft.body);
+  return pretty === null ? draft : { ...draft, body: pretty };
 }

@@ -68,6 +68,34 @@ describe("mouse interactivity", () => {
     expect(rowOf(app, "no response yet")).not.toBeNull(); // opened, not sent
   });
 
+  test("clicking a composer tab switches to it", async () => {
+    const app = await setupApp({
+      "alpha-check.ts": moduleSource("GET", "http://never-reached.test/alpha", { headers: { "x-kind": "probe" } }),
+    });
+    await app.mockMouse.click(5, rowIndexOf(app, "alpha-check"));
+    await app.flush();
+    await app.renderOnce();
+    const strip = frameText(app, HEIGHT).split("\n").findIndex(line => line.includes("PARAMS  HEADERS"));
+    const column = (frameText(app, HEIGHT).split("\n")[strip] ?? "").indexOf("HEADERS") + 2;
+    await app.mockMouse.click(column, strip);
+    await app.flush();
+    await app.renderOnce();
+    expect(rowOf(app, "x-kind: probe")).not.toBeNull(); // the HEADERS table is showing
+  });
+
+  test("clicking a response tab switches to it", async () => {
+    const app = await setupApp({
+      "alpha-check.ts": moduleSource("GET", "http://never-reached.test/alpha"),
+    });
+    const strip = rowIndexOf(app, "BODY  HEADERS  TESTS");
+    const column = (frameText(app, HEIGHT).split("\n")[strip] ?? "").indexOf("TESTS") + 2;
+    await app.mockMouse.click(column, strip);
+    await app.flush();
+    await app.shell.response.settled();
+    await app.renderOnce();
+    expect(app.shell.response.tab).toBe("tests");
+  });
+
   test("clicking a pane focuses it (border treatment follows)", async () => {
     const app = await setupApp({
       "alpha-check.ts": moduleSource("GET", "http://alpha.test/"),

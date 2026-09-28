@@ -22,6 +22,13 @@ export const RESPONSE_PANE_ID = "response";
  */
 export const MAX_BODY_WINDOW = 1024 * 1024;
 
+/**
+ * The TUI's starting body window. A person reading a response wants the
+ * whole thing, so the TUI opens at 64 KiB; the 256 B digest is the AGENT
+ * default (rule_agent_body_cap) and stays the floor that - narrows to.
+ */
+export const TUI_BODY_WINDOW = 64 * 1024;
+
 type ResponseTab = "body" | "headers" | "tests";
 
 const TABS: readonly ResponseTab[] = ["body", "headers", "tests"];
@@ -86,6 +93,8 @@ export interface ResponsePane {
   setRequestName(name: string | null): void;
   /** Resolves when any background work (the tests listing) has finished. */
   settled(): Promise<void>;
+  /** The tab on show. */
+  readonly tab: ResponseTab;
 }
 
 interface TestsListing {
@@ -120,7 +129,7 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
 
   const state = {
     tab: "body" as ResponseTab,
-    bodyWindow: DEFAULT_BODY_WINDOW,
+    bodyWindow: TUI_BODY_WINDOW,
     view: { kind: "idle" } as ResponseView,
     note: null as string | null,
     requestName: null as string | null,
@@ -175,6 +184,7 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
       note: state.note,
       requestName: state.requestName,
       tests: state.tests,
+      onTab: selectTab,
     };
     busy = renderResponsePane(renderer, pane, renderState, takeReveal());
     // Only a result can outgrow the pane; the idle/sending/error states are
@@ -208,13 +218,18 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
       render();
     });
 
-  const stepTab = (delta: 1 | -1): void => {
-    const index = TABS.indexOf(state.tab);
-    state.tab = TABS[(index + delta + TABS.length) % TABS.length] as ResponseTab;
+  /** Show one tab (arrow keys step to it, a click jumps to it). */
+  const selectTab = (tab: ResponseTab): void => {
+    state.tab = tab;
     if (state.tab === "tests" && state.tests.forName !== state.requestName) {
       void readTests();
     }
     render();
+  };
+
+  const stepTab = (delta: 1 | -1): void => {
+    const index = TABS.indexOf(state.tab);
+    selectTab(TABS[(index + delta + TABS.length) % TABS.length] as ResponseTab);
   };
 
   const resizeWindow = (next: number): boolean => {
@@ -300,6 +315,9 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
       void readTests();
     },
     settled: () => tail,
+    get tab(): ResponseTab {
+      return state.tab;
+    },
   };
 }
 

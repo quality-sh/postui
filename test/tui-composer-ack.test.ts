@@ -173,9 +173,14 @@ describe("body editor", () => {
     await focusComposer(app);
     await arrows(app, "down", "down"); // into the body, cursor at 0
     const text = frameText(app, HEIGHT);
-    expect(text).toContain(' 1  {"name": "Ada", "age": 36}'); // as typed, never re-laid out
+    // A one-line JSON body opens laid out (composer-body.ts prettyBody); edits then keep it as typed.
+    expect(text).toContain(" 1  {");
+    expect(text).toContain(' 2    "name": "Ada",');
+    expect(text).toContain(' 3    "age": 36');
     const spans = flatSpans(app);
-    const colorOf = (needle: string): { equals(v: unknown): boolean } | undefined => spans.find(span => span.text === needle)?.fg;
+    // Trimmed: indentation shares the key's colour, so a key's span can start with it.
+    const colorOf = (needle: string): { equals(v: unknown): boolean } | undefined =>
+      spans.find(span => span.text.trim() === needle)?.fg;
     expect(colorOf('"Ada"')?.equals(hex(JSON_COLORS.string))).toBe(true);
     expect(colorOf("36")?.equals(hex(JSON_COLORS.number))).toBe(true);
     expect(colorOf('"name"')?.equals(hex(JSON_COLORS.key))).toBe(true);

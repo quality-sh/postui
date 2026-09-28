@@ -2,7 +2,7 @@ import { BoxRenderable, TextAttributes, TextRenderable } from "@opentui/core";
 import type { CliRenderer, MouseEvent } from "@opentui/core";
 import type { LoadedRequest } from "../gen/load.ts";
 import { COMPOSER_TABS } from "./composer-editor.ts";
-import type { EditorState } from "./composer-editor.ts";
+import type { ComposerTab, EditorState } from "./composer-editor.ts";
 import type { ComposerFx } from "./composer-fx.ts";
 import { mountContent, type LiveParts } from "./composer-mount.ts";
 import { contentLines } from "./composer-render-content.ts";
@@ -70,6 +70,8 @@ export interface ComposerRenderState {
   readonly hoverable: (box: BoxRenderable, target: string) => void;
   readonly live: LiveParts;
   readonly onSendClick: () => void;
+  /** A tab label was clicked. */
+  readonly onTabClick: (tab: ComposerTab) => void;
 }
 
 const MESSAGE_COLORS: Record<ComposerMessage["tone"], string> = {
@@ -268,6 +270,9 @@ function tabStrip(renderer: CliRenderer, state: ComposerRenderState): BoxRendera
     const active = tab === state.editor.tab;
     const pill = active && stripFocused;
     const box = new BoxRenderable(renderer, {});
+    box.onMouseDown = (event: MouseEvent): void => {
+      if (event.button === 0) state.onTabClick(tab);
+    };
     state.fx.bind(`tab:${tab}`, () => (pill ? THEME.color.accent : THEME.color.panel), color => {
       box.backgroundColor = color;
     });

@@ -134,7 +134,8 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     // it is waiting on (GET /users) — scoped to this shell, not a global.
     sendDraft: (draft, name, bodyWindow) => {
       sends.described({ method: draft.method, url: draft.url });
-      return sendDraft(draft, name, bodyWindow);
+      // A plain send uses the response pane's window (64 KiB to start); +/- pass their own.
+      return sendDraft(draft, name, bodyWindow ?? response.bodyWindow);
     },
     diagnostics: {
       showSending: () => sends.started(),

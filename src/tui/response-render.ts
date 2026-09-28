@@ -46,6 +46,8 @@ export interface ResponseRenderState {
   readonly note: string | null;
   readonly requestName: string | null;
   readonly tests: { readonly forName: string | null; readonly files: string[]; readonly error: unknown };
+  /** A tab label was clicked. */
+  readonly onTab?: (tab: "body" | "headers" | "tests") => void;
 }
 
 /** Develop this render's content in, seeded (the send number). */
@@ -53,6 +55,7 @@ export interface RenderReveal {
   readonly seed: number;
 }
 
+const TAB_IDS = ["body", "headers", "tests"] as const;
 const RESPONSE_TABS = ["BODY", "HEADERS", "TESTS"] as const;
 
 /** Frame rows plus the status and tab rows: what the content cannot use. */
@@ -84,7 +87,11 @@ export function renderResponsePane(
   const header = busy === null ? statusChunks(state) : busy.node;
   const status = statusLine(renderer, pane, header);
   if (status !== null) pane.add(status);
-  pane.add(tabsRow(renderer, RESPONSE_TABS, tabIndexOf(state.tab), THEME.color.accent));
+  pane.add(
+    tabsRow(renderer, RESPONSE_TABS, tabIndexOf(state.tab), THEME.color.accent, index => {
+      state.onTab?.(TAB_IDS[index] ?? "body");
+    }),
+  );
 
   const content = contentNodes(renderer, pane, state, reveal);
   for (const node of content) pane.add(node);

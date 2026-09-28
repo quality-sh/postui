@@ -1,5 +1,5 @@
 import { BoxRenderable, StyledText, TextRenderable, bold, fg, underline } from "@opentui/core";
-import type { CliRenderer } from "@opentui/core";
+import type { CliRenderer, MouseEvent } from "@opentui/core";
 import { THEME } from "./theme.ts";
 
 /**
@@ -246,6 +246,7 @@ export function tabsRow(
   labels: readonly string[],
   active: number,
   underlineColor: string,
+  onSelect?: (index: number) => void,
 ): BoxRenderable {
   const row = new BoxRenderable(renderer, {
     flexDirection: "row",
@@ -253,15 +254,17 @@ export function tabsRow(
     width: "100%",
   });
   labels.forEach((label, index) => {
-    if (index === active) {
-      row.add(
-        new TextRenderable(renderer, {
-          content: new StyledText([underline(bold(fg(underlineColor)(label)))]),
-        }),
-      );
-      return;
+    const tab =
+      index === active
+        ? new TextRenderable(renderer, { content: new StyledText([underline(bold(fg(underlineColor)(label)))]) })
+        : new TextRenderable(renderer, { content: label, fg: THEME.color.muted });
+    // A left click picks the tab (the event still bubbles, so the pane takes focus too).
+    if (onSelect !== undefined) {
+      tab.onMouseDown = (event: MouseEvent): void => {
+        if (event.button === 0) onSelect(index);
+      };
     }
-    row.add(new TextRenderable(renderer, { content: label, fg: THEME.color.muted }));
+    row.add(tab);
   });
   return row;
 }

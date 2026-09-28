@@ -65,3 +65,17 @@ export function bodySpans(text: string): Span[][] {
   }
   return lines;
 }
+
+/**
+ * A one-line JSON body laid out for reading (two-space indent), its tokens
+ * exactly as written — the layout comes from highlightJson, which never
+ * re-prints a number, so `1.0` and 20-digit ids survive. Null when the body
+ * is not complete JSON, has nothing to lay out, or already spans lines (its
+ * author chose that layout).
+ */
+export function prettyBody(text: string): string | null {
+  if (text.includes("\n")) return null;
+  const laidOut = highlightJson(text);
+  if (laidOut.format !== "json" || laidOut.lines.length < 2) return null;
+  return laidOut.lines.map(line => line.map(part => part.text).join("")).join("\n");
+}

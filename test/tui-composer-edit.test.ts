@@ -103,7 +103,8 @@ describe("composer editing", () => {
       return new Response("{}", { status: 200 });
     });
     const app = await setupApp({
-      "note.ts": moduleSource("POST", server.url("/"), { body: '{"a":1}' }),
+      // Not JSON, so it opens exactly as saved (a JSON body would open laid out).
+      "note.ts": moduleSource("POST", server.url("/"), { body: "hello}" }),
     });
     await openFirstRequest(app);
     await focusComposer(app);
@@ -116,13 +117,13 @@ describe("composer editing", () => {
     await app.mockInput.typeText("q"); // q types in the body
     await app.flush();
     const text = frameText(app, HEIGHT);
-    expect(text).toContain(' 1  {"a":1,"b":2');
+    expect(text).toContain(' 1  hello,"b":2');
     expect(text).toContain(" 2  q}"); // line numbers kept
     expect(received).toBe(""); // nothing sent yet
     await pressEscape(app);
     app.mockInput.pressEnter(); // from the tab strip, enter sends
     await settle(app);
-    expect(received).toBe('{"a":1,"b":2\nq}');
+    expect(received).toBe('hello,"b":2\nq}');
     server.close();
   });
 
