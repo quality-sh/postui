@@ -1,11 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { engine, RGBA } from "@opentui/core";
+import { BoxRenderable, engine, RGBA } from "@opentui/core";
 import {
   attachMotion,
   blendHex,
   detachMotion,
   settleBorder,
   sweepBorder,
+  sweepFill,
 } from "../src/tui/motion.ts";
 import { COMPOSER_PANE_ID, RESPONSE_PANE_ID } from "../src/tui/shell.ts";
 import { THEME } from "../src/tui/theme.ts";
@@ -41,16 +42,16 @@ describe("mouse interactivity", () => {
       "alpha-check.ts": moduleSource("GET", "http://alpha.test/"),
       "beta-check.ts": moduleSource("POST", "http://beta.test/", { body: "x=1" }),
     });
-    // Baseline: the bar (▶ marker) sits on the first request.
-    expect(rowOf(app, "alpha-check") ?? "").toContain("▶");
+    // Baseline: the bar (▌ marker) sits on the first request.
+    expect(rowOf(app, "alpha-check") ?? "").toContain("▌");
     // The second request's text row, inside the collections pane.
     const betaRow = rowIndexOf(app, "beta-check");
     expect(betaRow).toBeGreaterThan(0);
     await app.mockMouse.click(5, betaRow);
     await app.flush();
     await app.renderOnce();
-    expect(rowOf(app, "beta-check") ?? "").toContain("▶");
-    expect(rowOf(app, "alpha-check") ?? "").not.toContain("▶");
+    expect(rowOf(app, "beta-check") ?? "").toContain("▌");
+    expect(rowOf(app, "alpha-check") ?? "").not.toContain("▌");
   });
 
   test("clicking a pane focuses it (border treatment follows)", async () => {
@@ -91,7 +92,7 @@ describe("mouse interactivity", () => {
     await app.shell.collections.settled();
     await app.renderOnce();
     expect(app.shell.focus.focused).toBe("collections");
-    expect(rowOf(app, "beta-check") ?? "").toContain("▶");
+    expect(rowOf(app, "beta-check") ?? "").toContain("▌");
   });
 });
 
@@ -151,6 +152,38 @@ describe("motion primitives", () => {
       expect(pane.borderColor.equals(RGBA.fromHex(THEME.color.border))).toBe(true);
     } finally {
       detachMotion();
+      detach();
+    }
+  });
+
+  test("sweepFill drives a box's background the same way, landing on the end color", async () => {
+    const app = await setupApp();
+    const box = app.shell.statusBar.pane;
+    const detach = attachMotion(app.renderer);
+    try {
+      expect(sweepFill(box, THEME.color.accentSoft, THEME.color.bg)).toBe(true);
+      engine.update(500);
+      expect(box.backgroundColor.equals(RGBA.fromHex(THEME.color.bg))).toBe(true);
+    } finally {
+      detachMotion();
+      detach();
+    }
+    // Without the engine: the end color at once.
+    expect(sweepFill(box, THEME.color.accentSoft, THEME.color.panel)).toBe(false);
+    expect(box.backgroundColor.equals(RGBA.fromHex(THEME.color.panel))).toBe(true);
+  });
+
+  test("a sweep on a box a re-render destroyed stops painting instead of touching it", async () => {
+    const app = await setupApp();
+    const box = new BoxRenderable(app.renderer, { backgroundColor: THEME.color.element });
+    app.renderer.root.add(box);
+    const detach = attachMotion(app.renderer);
+    try {
+      expect(sweepFill(box, THEME.color.accent, THEME.color.accentSoft)).toBe(true);
+      box.destroyRecursively(); // what clearChildren does to a pane's old rows
+      expect(() => engine.update(500)).not.toThrow();
+    } finally {
+      expect(() => detachMotion()).not.toThrow();
       detach();
     }
   });

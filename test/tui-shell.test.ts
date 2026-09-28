@@ -3,7 +3,7 @@ import { RGBA } from "@opentui/core";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import { COLLECTIONS_PANE_ID, COMPOSER_PANE_ID, RESPONSE_PANE_ID, startShell } from "../src/tui/shell.ts";
 import { THEME } from "../src/tui/theme.ts";
-import { flatSpans, frameText } from "./helpers/tui-capture.ts";
+import { flatSpans, frameText, rowContaining } from "./helpers/tui-capture.ts";
 
 const WIDTH = 100;
 const HEIGHT = 24;
@@ -56,7 +56,7 @@ describe("postui tui shell", () => {
   test("the status bar follows focus: each pane shows its own hints", async () => {
     const setup = await setupShell();
     await setup.renderOnce();
-    const bar = (): string => frameText(setup, HEIGHT).split("\n").at(-2) ?? "";
+    const bar = (): string => frameText(setup, HEIGHT).split("\n").at(-1) ?? "";
     expect(bar()).toContain("↑↓ select");
     setup.mockInput.pressTab();
     await setup.flush();
@@ -101,12 +101,19 @@ describe("postui tui shell", () => {
     expect(text).toContain("postui save");
   });
 
-  test("the wordmark is painted in the pink/red accent from the theme", async () => {
+  test("the wordmark's letters walk the bloom palette, opening on the accent", async () => {
     const setup = await setupShell();
     await setup.renderOnce();
-    const accent = RGBA.fromHex(THEME.color.accent);
-    const wordmark = flatSpans(setup).find((span) => span.text.includes("P O S T U I"));
-    expect(wordmark?.fg.equals(accent)).toBe(true);
+    expect(rowContaining(setup, "P O S T U I")).not.toBeNull();
+    const spans = flatSpans(setup);
+    const letter = (text: string) => spans.find((span) => span.text === text);
+    expect(letter("P")?.fg.equals(RGBA.fromHex(THEME.color.accent))).toBe(true);
+    // Six letters, six different bloom colors.
+    const colors = ["P", "O", "S", "T", "U", "I"].map((text) =>
+      THEME.bloom.findIndex((color) => letter(text)?.fg.equals(RGBA.fromHex(color)) === true),
+    );
+    expect(colors.every((index) => index >= 0)).toBe(true);
+    expect(new Set(colors).size).toBe(6);
   });
 
   test("the focused pane's border repaints in accent while other chrome stays muted", async () => {
@@ -117,12 +124,12 @@ describe("postui tui shell", () => {
     const spans = flatSpans(setup);
     // Border glyphs of the focused collections pane are painted accent...
     const accentBorder = spans.filter(
-      (span) => span.fg.equals(accent) && /[─│┌┐└┘]/.test(span.text),
+      (span) => span.fg.equals(accent) && /[─│╭╮╰╯]/.test(span.text),
     );
     expect(accentBorder.length).toBeGreaterThan(0);
-    // ...while the header/status borders stay muted.
+    // ...while the header and the other panes stay at rest.
     const mutedBorder = spans.filter(
-      (span) => span.fg.equals(muted) && /[─│┌┐└┘]/.test(span.text),
+      (span) => span.fg.equals(muted) && /[─│╭╮╰╯]/.test(span.text),
     );
     expect(mutedBorder.length).toBeGreaterThan(0);
     expect(setup.shell.focus.focused).toBe(COLLECTIONS_PANE_ID);

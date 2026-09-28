@@ -39,15 +39,17 @@ describe("composer pane", () => {
     expect(text).toContain('"name": "Ada"'); // the body editor shows the body
   });
 
-  test("the mutating method badge is painted in the accent", async () => {
+  test("the method pill paints the method in its own color", async () => {
     const app = await setupApp({
       "create-user.ts": moduleSource("POST", "https://api.dev/users"),
     });
     await openFirstRequest(app);
-    const accent = RGBA.fromHex(THEME.color.accent);
+    const gold = RGBA.fromHex(THEME.color.gold);
     const spans = app.captureSpans().lines.flatMap(line => line.spans);
-    const post = spans.find(span => span.text.trim() === "POST");
-    expect(post?.fg.equals(accent)).toBe(true);
+    // The composer's badge is the second POST on screen (collections first).
+    const posts = spans.filter(span => span.text.trim() === "POST");
+    expect(posts.length).toBe(2);
+    for (const post of posts) expect(post.fg.equals(gold)).toBe(true);
   });
 
   test("←/→ on the tab strip switch the composer tabs and the content follows", async () => {
@@ -185,12 +187,12 @@ describe("composer pane", () => {
       quit = true;
       return quit;
     });
-    const before = rowContaining(app, "▶");
+    const before = rowContaining(app, "▌");
     await app.mockInput.typeText("jq/");
     await app.flush();
     expect(app.shell.composer.isEditingText()).toBe(true);
     expect(frameText(app, HEIGHT)).toContain("https://api.dev/onejq/");
-    expect(rowContaining(app, "▶")).toBe(before);
+    expect(rowContaining(app, "▌")).toBe(before);
     expect(app.shell.focus.focused).toBe("composer");
     expect(app.shell.searching).toBe(false);
     expect(quit).toBe(false);
@@ -222,8 +224,8 @@ describe("composer pane", () => {
     await openFirstRequest(app);
     const text = frameText(app, HEIGHT);
     expect(text).not.toContain("─BODY─"); // the old titled inner box
-    // the gutter sits right against the pane border: no nested border between
-    expect(rowContaining(app, "1 │ hello")).toMatch(/│1 │ hello/);
+    // the gutter sits one cell in from the pane border: no nested border between
+    expect(rowContaining(app, "1 │ hello")).toMatch(/│ 1 │ hello/);
     expect(text).not.toContain("u edit url");
   });
 });

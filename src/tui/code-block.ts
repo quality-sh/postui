@@ -7,12 +7,12 @@ import { JSON_COLORS, THEME } from "./theme.ts";
 const MAX_BLOCK_LINES = 200;
 
 /**
- * The mockup's code block, for a laid-out body (json-highlight.ts): a
- * bordered box holding a gutter of line numbers, a vertical rule, and the
- * lines colored by token kind. It takes the room its parent has and scrolls
- * with the mouse wheel when the lines outgrow it; it never takes key focus,
- * so the pane's own keys keep working. Long lines wrap inside the rule, so
- * the gutter stays clean. A `partial` layout ends in a dim "…" where the
+ * The mockup's code block, for a laid-out body (json-highlight.ts): no box
+ * of its own, just a gutter of line numbers on the element tone beside the
+ * lines on the pane's panel, colored by token kind. It takes the room its
+ * parent has and scrolls with the mouse wheel when the lines outgrow it; it
+ * never takes key focus, so the pane's own keys keep working. Long lines
+ * wrap beside the gutter, so the numbers stay clean. A `partial` layout ends in a dim "…" where the
  * text was cut. Past MAX_BLOCK_LINES the block says so instead of silently
  * hiding the rest, and never builds more renderables than the cap.
  */
@@ -23,12 +23,10 @@ export function codeBlock(renderer: CliRenderer, layout: HighlightedJson): Scrol
     flexGrow: 1,
     flexShrink: 1,
     flexBasis: 0,
-    minHeight: 3,
+    minHeight: 1,
     width: "100%",
-    border: true,
-    borderColor: THEME.color.border,
-    backgroundColor: THEME.color.bg,
-    scrollbarOptions: { trackOptions: { foregroundColor: THEME.color.dim, backgroundColor: THEME.color.bg } },
+    backgroundColor: THEME.color.panel,
+    scrollbarOptions: { trackOptions: { foregroundColor: THEME.color.dim, backgroundColor: THEME.color.panel } },
   });
   block.focusable = false;
   // Lines wrap, so there is never anything to scroll sideways; pinning the
@@ -54,7 +52,11 @@ export function codeBlock(renderer: CliRenderer, layout: HighlightedJson): Scrol
   return block;
 }
 
-/** One numbered line: gutter number, the rule (the cell's left border), the spans. */
+/**
+ * One numbered line: the gutter number on the element tone (its box
+ * stretches with a wrapped line, so the gutter stays one unbroken strip),
+ * then the spans.
+ */
 function codeLine(
   renderer: CliRenderer,
   number: string,
@@ -62,10 +64,10 @@ function codeLine(
   color?: string,
 ): BoxRenderable {
   const row = new BoxRenderable(renderer, { flexDirection: "row", width: "100%" });
-  row.add(new TextRenderable(renderer, { content: ` ${number} `, fg: THEME.color.text, flexShrink: 0 }));
+  const gutter = new BoxRenderable(renderer, { backgroundColor: THEME.color.element, flexShrink: 0 });
+  gutter.add(new TextRenderable(renderer, { content: ` ${number} `, fg: THEME.color.dim }));
+  row.add(gutter);
   const cell = new BoxRenderable(renderer, {
-    border: ["left"],
-    borderColor: THEME.color.border,
     paddingLeft: 1,
     flexGrow: 1,
     flexShrink: 1,

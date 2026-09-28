@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import {
-  collectionTitle,
-  groupByCollection,
-  isMutatingMethod,
-} from "../src/tui/collection-groups.ts";
+import { collectionTitle, groupByCollection } from "../src/tui/collection-groups.ts";
 
-describe("collection grouping and coloring (pure)", () => {
+describe("collection grouping (pure)", () => {
   test("the collection title is the first URL path segment, capitalized like the mockup", () => {
     expect(collectionTitle("https://api.dev/users")).toBe("Users");
     expect(collectionTitle("https://api.dev/users/123/orders")).toBe("Users");
@@ -18,15 +14,6 @@ describe("collection grouping and coloring (pure)", () => {
 
   test("an unparsable URL groups under an honest marker instead of crashing", () => {
     expect(collectionTitle("not a url")).toBe("(invalid url)");
-  });
-
-  test("mutating methods get the accent treatment; safe methods stay muted", () => {
-    for (const method of ["POST", "PUT", "PATCH", "DELETE", "post"]) {
-      expect(isMutatingMethod(method)).toBe(true);
-    }
-    for (const method of ["GET", "HEAD", "OPTIONS", "get"]) {
-      expect(isMutatingMethod(method)).toBe(false);
-    }
   });
 
   test("groupByCollection sorts groups by title and keeps loader order within a group", () => {

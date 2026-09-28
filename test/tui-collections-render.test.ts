@@ -2,10 +2,10 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { BoxRenderable, RGBA } from "@opentui/core";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import type { LoadedRequest } from "../src/gen/load.ts";
-import { REQUEST_ROW_HEIGHT, requestRow, treeBranch } from "../src/tui/collections-render.ts";
+import { REQUEST_ROW_HEIGHT, methodBadge, requestRow, treeBranch } from "../src/tui/collections-render.ts";
 import type { TreeBranch } from "../src/tui/collections-render.ts";
 import { flattenRows } from "../src/tui/collections-rows.ts";
-import { THEME } from "../src/tui/theme.ts";
+import { THEME, methodColor } from "../src/tui/theme.ts";
 import { flatSpans, frameText } from "./helpers/tui-capture.ts";
 
 /** A fake loaded request; identity (object identity) is what matters. */
@@ -37,17 +37,15 @@ async function renderRow(
 }
 
 /**
- * Whether each method's badge is painted as expected — mutating methods in
- * the accent, safe ones green — rendered one after another on the shared
- * renderer.
+ * Whether each method's badge is painted in its method color (theme.ts
+ * methodColor), rendered one after another on the shared renderer.
  */
 async function badgeColorsMatch(methods: readonly string[]): Promise<boolean[]> {
   const [method, ...rest] = methods;
   if (method === undefined) return [];
   const spans = flatSpans(await renderRow(req("m", method), false));
-  const badge = spans.find(span => span.text.trim() === method);
-  const expected = ["POST", "PUT", "PATCH", "DELETE"].includes(method) ? THEME.color.accent : THEME.color.safe;
-  return [badge?.fg.equals(RGBA.fromHex(expected)) === true, ...(await badgeColorsMatch(rest))];
+  const badge = spans.find(span => span.text.trim() === methodBadge(method));
+  return [badge?.fg.equals(RGBA.fromHex(methodColor(method))) === true, ...(await badgeColorsMatch(rest))];
 }
 
 describe("treeBranch", () => {
@@ -75,62 +73,65 @@ describe("treeBranch", () => {
   });
 });
 
+/** The rendered row as text, trailing blanks trimmed. */
+function rowLine(setup: TestRendererSetup): string {
+  return frameText(setup, REQUEST_ROW_HEIGHT).trimEnd();
+}
+
 describe("requestRow", () => {
-  test("the selected row is a box, with the marker outside it", async () => {
+  test("rows are one terminal row: the selection is a bar and a fill, never a box", async () => {
+    expect(REQUEST_ROW_HEIGHT).toBe(1);
     const setup = await renderRow(req("create-user", "POST"), true);
-    expect(frameText(setup, REQUEST_ROW_HEIGHT).split("\n").map(line => line.trimEnd())).toEqual([
-      " ┌─────────────────────────┐",
-      "▶│ POST  create-user       │",
-      " └─────────────────────────┘",
-    ]);
+    expect(rowLine(setup)).toBe("▌├ POST  create-user");
     const accent = RGBA.fromHex(THEME.color.accent);
-    const marker = flatSpans(setup).find(span => span.text.includes("▶"));
-    expect(marker?.fg.equals(accent)).toBe(true);
+    const accentSoft = RGBA.fromHex(THEME.color.accentSoft);
+    const spans = flatSpans(setup);
+    const bar = spans.find(span => span.text.includes("▌"));
+    expect(bar?.fg.equals(accent)).toBe(true);
+    // The fill runs under the whole row, name included.
+    const name = spans.find(span => span.text.includes("create-user"));
+    expect(name?.bg.equals(accentSoft)).toBe(true);
   });
 
-  test("an unselected row is plain, hanging off the tree guide", async () => {
+  test("an unselected row is plain, hanging off the tree guide on the pane's own fill", async () => {
     const setup = await renderRow(req("list-users"), false);
-    expect(frameText(setup, REQUEST_ROW_HEIGHT).split("\n").map(line => line.trimEnd())).toEqual([
-      " │",
-      " ├ GET   list-users",
-      " │",
-    ]);
+    expect(rowLine(setup)).toBe(" ├ GET   list-users");
+    const accentSoft = RGBA.fromHex(THEME.color.accentSoft);
+    expect(flatSpans(setup).some(span => span.bg.equals(accentSoft))).toBe(false);
   });
 
   test("the group's last row closes the guide", async () => {
     const setup = await renderRow(req("health"), false, "last");
-    expect(frameText(setup, REQUEST_ROW_HEIGHT).split("\n").map(line => line.trimEnd())).toEqual([
-      " │",
-      " └ GET   health",
-      "",
-    ]);
+    expect(rowLine(setup)).toBe(" └ GET   health");
   });
 
   test("a match-list row draws no guide", async () => {
     const setup = await renderRow(req("health"), false, "none");
-    expect(frameText(setup, REQUEST_ROW_HEIGHT).split("\n").map(line => line.trimEnd())).toEqual([
-      "",
-      "   GET   health",
-      "",
-    ]);
+    expect(rowLine(setup)).toBe("   GET   health");
   });
 
-  test("badge and name columns line up between the boxed and the plain rows", async () => {
-    const boxed = (await renderRow(req("one", "POST"), true)).captureCharFrame().split("\n")[1] ?? "";
-    const plain = (await renderRow(req("two"), false)).captureCharFrame().split("\n")[1] ?? "";
-    expect(boxed.indexOf("POST")).toBe(plain.indexOf("GET"));
-    expect(boxed.indexOf("one")).toBe(plain.indexOf("two"));
+  test("badge and name columns line up between the selected and the plain rows", async () => {
+    const selected = (await renderRow(req("one", "POST"), true)).captureCharFrame().split("\n")[0] ?? "";
+    const plain = (await renderRow(req("two"), false)).captureCharFrame().split("\n")[0] ?? "";
+    expect(selected.indexOf("POST")).toBe(plain.indexOf("GET"));
+    expect(selected.indexOf("one")).toBe(plain.indexOf("two"));
   });
 
-  test("method colors: mutating methods in the accent, safe ones green", async () => {
+  test("method colors: GET foam, POST gold, PUT/PATCH rose, DELETE love, HEAD/OPTIONS muted", async () => {
     const methods = ["POST", "PUT", "PATCH", "DELETE", "GET", "HEAD", "OPTIONS"];
     expect(await badgeColorsMatch(methods)).toEqual(methods.map(() => true));
   });
 
-  test("long names clip with an ellipsis inside the box", async () => {
+  test("DELETE and OPTIONS badges shorten so the name never touches the badge", async () => {
+    expect(rowLine(await renderRow(req("drop-user", "DELETE"), false))).toBe(" ├ DEL   drop-user");
+    expect(rowLine(await renderRow(req("preflight", "OPTIONS"), false))).toBe(" ├ OPT   preflight");
+    expect(rowLine(await renderRow(req("tweak", "PATCH"), false))).toBe(" ├ PATCH tweak");
+  });
+
+  test("long names clip with an ellipsis inside the pane's width", async () => {
     const setup = await renderRow(req("a-very-long-request-module-name", "POST"), true);
-    const line = frameText(setup, REQUEST_ROW_HEIGHT).split("\n")[1] ?? "";
-    expect(line).toContain("a-very-long-reque…");
-    expect(line.trimEnd().endsWith("│")).toBe(true); // the name never pushes through the border
+    const line = rowLine(setup);
+    expect(line).toContain("a-very-long-reques…");
+    expect(line.length).toBeLessThanOrEqual(28); // never past the pane's inner width
   });
 });

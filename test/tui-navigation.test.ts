@@ -51,10 +51,10 @@ describe("collections arrows", () => {
     });
     setup.mockInput.pressArrow("down");
     await setup.flush();
-    expect(rowContaining(setup, "▶")).toContain("two");
+    expect(rowContaining(setup, "▌")).toContain("two");
     setup.mockInput.pressArrow("up");
     await setup.flush();
-    expect(rowContaining(setup, "▶")).toContain("one");
+    expect(rowContaining(setup, "▌")).toContain("one");
   });
 });
 
@@ -117,13 +117,13 @@ describe("response pane arrows", () => {
     const server = serve(() => new Response(lines.join("\n"), { status: 200 }));
     const app = await setupApp({ "long.ts": moduleSource("GET", server.url("/")) });
     await sendAndFocusResponse(app);
-    expect(frameText(app, HEIGHT)).toContain(" 1 │ l01");
+    expect(frameText(app, HEIGHT)).toContain(" 1  l01");
     for (const _ of [1, 2, 3, 4, 5]) app.mockInput.pressArrow("down");
     await app.flush();
     await app.renderOnce();
     expect(app.shell.response.scrollTop).toBe(5);
     let text = frameText(app, HEIGHT);
-    expect(text).not.toContain(" 1 │ l01"); // scrolled out…
+    expect(text).not.toContain(" 1  l01"); // scrolled out…
     expect(text).toContain("200 OK"); // …under the status line…
     expect(text).toContain("BODY  HEADERS  TESTS"); // …and the tabs, which stay
     app.mockInput.pressKey("k");
@@ -137,7 +137,7 @@ describe("response pane arrows", () => {
     await app.renderOnce();
     expect(app.shell.response.scrollTop).toBe(0); // clamped at the top
     text = frameText(app, HEIGHT);
-    expect(text).toContain(" 1 │ l01");
+    expect(text).toContain(" 1  l01");
     server.close();
   });
 
@@ -157,7 +157,7 @@ describe("response pane arrows", () => {
     app.mockInput.pressArrow("left"); // back to BODY
     await app.flush();
     await app.renderOnce();
-    expect(frameText(app, HEIGHT)).toContain("│ l0");
+    expect(frameText(app, HEIGHT)).toContain(" 1  l0");
     app.mockInput.pressArrow("left"); // wraps to TESTS
     await app.flush();
     await app.shell.response.settled();

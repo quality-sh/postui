@@ -30,6 +30,16 @@ export async function runTui(options: TuiOptions): Promise<number> {
   const renderer = await createCliRenderer({
     backgroundColor: THEME.color.bg,
     exitOnCtrlC: false,
+    // 60 fps so sweeps and spinners move smoothly (the default target is
+    // 30); stats off, nothing reads them.
+    targetFps: 60,
+    maxFps: 60,
+    gatherStats: false,
+    // Kitty keyboard protocol with OpenTUI's defaults (disambiguate +
+    // alternate keys): a lone esc arrives at once instead of after the
+    // escape-sequence timeout. Terminals without it ignore the request and
+    // keep sending legacy bytes, which the parser still reads.
+    useKittyKeyboard: {},
   });
   const detachMotion = attachMotion(renderer);
   let shell: ReturnType<typeof startShell>;

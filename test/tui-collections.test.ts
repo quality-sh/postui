@@ -91,18 +91,16 @@ describe("collections pane", () => {
     expect(text).toContain("GET");
   });
 
-  test("POST badges are painted in the accent; GET badges green, per the mockup", async () => {
+  test("method badges take their method colors: POST gold, GET foam", async () => {
     const setup = await setupCollections({
       "create-user.ts": moduleSource("POST", "https://api.dev/users"),
       "list-users.ts": moduleSource("GET", "https://api.dev/users"),
     });
-    const accent = RGBA.fromHex(THEME.color.accent);
-    const safe = RGBA.fromHex(THEME.color.safe);
     const spans = flatSpans(setup);
     const post = spans.find(span => span.text.trim() === "POST");
     const get = spans.find(span => span.text.trim() === "GET");
-    expect(post?.fg.equals(accent)).toBe(true);
-    expect(get?.fg.equals(safe)).toBe(true);
+    expect(post?.fg.equals(RGBA.fromHex(THEME.color.gold))).toBe(true);
+    expect(get?.fg.equals(RGBA.fromHex(THEME.color.foam))).toBe(true);
   });
 
   test("the first listing places the highlight on the first request, mockup-style", async () => {
@@ -110,7 +108,7 @@ describe("collections pane", () => {
       "alpha.ts": moduleSource("GET", "https://api.dev/health"),
       "beta.ts": moduleSource("POST", "https://api.dev/users"),
     });
-    expect(rowContaining(setup, "▶")).toContain("alpha");
+    expect(rowContaining(setup, "▌")).toContain("alpha");
   });
 
   test("j/k moves the highlight with wrap-around at both ends", async () => {
@@ -122,18 +120,18 @@ describe("collections pane", () => {
     // the loader lists modules in lexicographic order: one, three, two
     setup.mockInput.pressKey("j");
     await setup.flush();
-    expect(rowContaining(setup, "▶")).toContain("three");
+    expect(rowContaining(setup, "▌")).toContain("three");
     setup.mockInput.pressKey("k");
     await setup.flush();
-    expect(rowContaining(setup, "▶")).toContain("one");
+    expect(rowContaining(setup, "▌")).toContain("one");
     setup.mockInput.pressKey("k");
     await setup.flush();
     // wrapping backward past the top lands on the last module
-    expect(rowContaining(setup, "▶")).toContain("two");
+    expect(rowContaining(setup, "▌")).toContain("two");
     setup.mockInput.pressKey("j");
     await setup.flush();
     // wrapping forward past the bottom lands back on the first
-    expect(rowContaining(setup, "▶")).toContain("one");
+    expect(rowContaining(setup, "▌")).toContain("one");
   });
 
   test("the selected row carries the accent selection bar", async () => {
@@ -142,18 +140,23 @@ describe("collections pane", () => {
       "two.ts": moduleSource("GET", "https://api.dev/users"),
     });
     const accent = RGBA.fromHex(THEME.color.accent);
-    const marker = flatSpans(setup).find(span => span.text.includes("▶"));
+    const marker = flatSpans(setup).find(span => span.text.includes("▌"));
     expect(marker?.fg.equals(accent)).toBe(true);
   });
 
-  test("only the selected row is boxed; the others hang off the tree guide", async () => {
+  test("no row is boxed: the selection is a bar, the others hang off the tree guide", async () => {
     const get = moduleSource("GET", "https://api.dev/users");
     const setup = await setupCollections({ "one.ts": moduleSource("POST", "https://api.dev/users"), "three.ts": get, "two.ts": get });
-    // Inside the pane's border (the first 30 columns) only the selection's box top shows.
-    const paneLines = frameText(setup, HEIGHT).split("\n").map(line => line.slice(1, 29));
-    expect(paneLines.filter(line => line.includes("┌"))).toHaveLength(1);
-    expect(rowContaining(setup, "▶")).toContain("▶│ POST  one");
-    expect(rowContaining(setup, "three")).toContain("├ GET   three");
+    // Inside the pane's frame (the first 30 columns) no box corner shows.
+    const paneLines = frameText(setup, HEIGHT).split("\n").slice(4, -2).map(line => line.slice(1, 29));
+    expect(paneLines.filter(line => /[┌┐┘╭╮╰╯]/.test(line))).toHaveLength(0); // └ is the tree guide
+    expect(rowContaining(setup, "▌")).toContain("▌├ POST  one");
+    expect(rowContaining(setup, "three")).toContain(" ├ GET   three");
+    // One terminal row per request: the three requests sit on consecutive rows.
+    const rows = frameText(setup, HEIGHT).split("\n");
+    const at = (name: string): number => rows.findIndex(line => line.includes(name));
+    expect(at("three") - at("one")).toBe(1);
+    expect(at("two") - at("three")).toBe(1);
   });
 
   test("enter loads the selected request into the composer and sends it, focus staying put", async () => {
@@ -196,9 +199,9 @@ describe("collections pane", () => {
     const text = frameText(setup, HEIGHT);
     expect(text).toContain("Health"); // regrouped after the URL edit
     expect(text).not.toContain("Users");
-    const safe = RGBA.fromHex(THEME.color.safe);
+    const foam = RGBA.fromHex(THEME.color.foam);
     const get = flatSpans(setup).find(span => span.text.trim() === "GET");
-    expect(get?.fg.equals(safe)).toBe(true);
+    expect(get?.fg.equals(foam)).toBe(true);
   });
 
   test("refresh-on-focus also re-reads the open request into the composer", async () => {
@@ -231,7 +234,7 @@ describe("collections pane", () => {
     await refocus(setup);
     const text = frameText(setup, HEIGHT);
     expect(text).not.toContain("alpha");
-    expect(text).not.toContain("▶"); // no highlight invented for beta
+    expect(text).not.toContain("▌"); // no highlight invented for beta
     expect(text).toContain("beta");
     expect(text).toContain("no request loaded"); // the composer cleared
   });
@@ -243,7 +246,7 @@ describe("collections pane", () => {
     });
     await rm(join(setup.dir, "beta.ts"));
     await refocus(setup);
-    expect(rowContaining(setup, "▶")).toContain("alpha");
+    expect(rowContaining(setup, "▌")).toContain("alpha");
   });
 
   test("an empty requests folder renders the honest empty state", async () => {
@@ -269,19 +272,19 @@ describe("collections pane", () => {
 
   test("long lists scroll: the window follows the highlight", async () => {
     const files: Record<string, string> = {};
-    for (const index of [1, 2, 3, 4, 5, 6, 7, 8]) {
-      files[`req${index}.ts`] = moduleSource("GET", "https://api.dev/users");
-    }
+    const names = Array.from({ length: 20 }, (_, index) => `req${String(index + 1).padStart(2, "0")}`);
+    for (const name of names) files[`${name}.ts`] = moduleSource("GET", "https://api.dev/users");
     const setup = await setupCollections(files);
-    // At height 24 the pane shows 16 rows: one header plus five request boxes.
-    expect(frameText(setup, HEIGHT)).toContain("req5");
-    expect(frameText(setup, HEIGHT)).not.toContain("req6");
-    await setup.mockInput.pressKeys(["j", "j", "j", "j", "j"]);
+    // At height 24 the pane shows 18 rows: one header plus 17 one-row requests.
+    expect(frameText(setup, HEIGHT)).toContain("req17");
+    expect(frameText(setup, HEIGHT)).not.toContain("req18");
+    await setup.mockInput.pressKeys(Array.from({ length: 18 }, () => "j"));
     await setup.flush();
     await setup.renderOnce();
     const text = frameText(setup, HEIGHT);
-    expect(text).toContain("req6");
-    expect(text).not.toContain("req1"); // scrolled out of the window
+    expect(text).toContain("req19");
+    expect(rowContaining(setup, "▌")).toContain("req19");
+    expect(text).not.toContain("req01"); // scrolled out of the window
   });
 
   test("pane keys are inert while another pane holds focus", async () => {
@@ -293,10 +296,10 @@ describe("collections pane", () => {
     setup.shell.focus.focus("composer-probe");
     await setup.flush();
     expect(setup.shell.focus.focused).toBe("composer-probe");
-    const before = rowContaining(setup, "▶");
+    const before = rowContaining(setup, "▌");
     setup.mockInput.pressKey("j"); // must NOT move the highlight
     await setup.flush();
-    expect(rowContaining(setup, "▶")).toBe(before);
+    expect(rowContaining(setup, "▌")).toBe(before);
   });
 
   test("enter with nothing highlighted leaves the composer empty", async () => {

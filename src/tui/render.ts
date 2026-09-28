@@ -9,13 +9,22 @@ import { THEME } from "./theme.ts";
  * response panes stay visually consistent.
  */
 
-/** Remove every child of a box (getChildren() is a fresh array: safe to mutate while iterating). */
+/**
+ * Destroy every child of a box (getChildren() is a fresh array: safe to
+ * mutate while iterating). Destroy, not detach: a detached text renderable
+ * keeps its native text buffer, and panes rebuild their content on every
+ * render, so a detach-only clear leaks a buffer per row per repaint.
+ * Nothing may re-add a cleared child — every render builds fresh ones.
+ */
 export function clearChildren(box: BoxRenderable): void {
-  for (const child of box.getChildren()) box.remove(child);
+  for (const child of box.getChildren()) child.destroyRecursively();
 }
 
-/** The tone of one empty-state line (theme roles, never raw colors). */
-type EmptyTone = "text" | "dim" | "bright";
+/**
+ * The tone of one empty-state line: the message (what is missing), a hint,
+ * or the fix-it command. Tones map to theme roles, never raw colors.
+ */
+type EmptyTone = "message" | "hint" | "command";
 
 /** One line of the shared empty state: what is missing, or the way out. */
 export interface EmptyStateLine {
@@ -24,15 +33,15 @@ export interface EmptyStateLine {
 }
 
 const TONE_COLORS: Record<EmptyTone, string> = {
-  text: THEME.color.text,
-  dim: THEME.color.dim,
-  bright: THEME.color.bright,
+  message: THEME.color.muted,
+  hint: THEME.color.dim,
+  command: THEME.color.text,
 };
 
 /**
  * The ONE empty-state style every pane shares (the mockup's centered stacked
- * hint): what is missing in the text tone, hints dimmed, the fix-it command
- * bright. Panes pass their lines; the styling lives here so the panes
+ * hint): what is missing in the muted tone, hints dimmed, the fix-it
+ * command in the body text. Panes pass their lines; the styling lives here so the panes
  * cannot drift apart. `decor` pins the halftone dot field under the message
  * (the mockup's dotted left rail) — used by panes with large empty regions.
  */
@@ -133,7 +142,7 @@ function halftoneLines(
   return lines;
 }
 
-/** The halftone field as a fixed-size decoration box (dim dots on the bg). */
+/** The halftone field as a fixed-size decoration box (dim dots, no fill of its own). */
 export function halftoneBox(
   renderer: CliRenderer,
   width: number,
@@ -228,10 +237,9 @@ export function numberedLines(
 }
 
 /**
- * The mockup's tab strip: labels in a row, the active one bold/bright and
- * underlined (the mockup's underline marker; the underline renders in the
- * text color, so `underlineColor` picks the label's own color — accent in
- * the composer, gold in the response pane).
+ * The mockup's tab strip: labels in a row, the active one bold and
+ * underlined in `underlineColor` (the underline renders in the text color,
+ * so the color is the label's own), the others muted.
  */
 export function tabsRow(
   renderer: CliRenderer,
@@ -253,7 +261,7 @@ export function tabsRow(
       );
       return;
     }
-    row.add(new TextRenderable(renderer, { content: label, fg: THEME.color.text }));
+    row.add(new TextRenderable(renderer, { content: label, fg: THEME.color.muted }));
   });
   return row;
 }

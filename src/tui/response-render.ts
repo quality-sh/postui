@@ -10,7 +10,7 @@ import { THEME } from "./theme.ts";
 
 /**
  * Response pane rendering: the mockup's status line (status code colored —
- * gold for success, the accent red for errors — plus latency and size),
+ * foam for success, love for 4xx/5xx and failed sends — plus latency and size),
  * BODY/HEADERS/TESTS tabs, the body as pretty-printed, colored JSON in a
  * line-numbered block, and the diagnostic region.
  *
@@ -50,7 +50,7 @@ export function renderResponsePane(
 ): void {
   const status = statusLine(renderer, pane, state);
   if (status !== null) pane.add(status);
-  pane.add(tabsRow(renderer, RESPONSE_TABS, tabIndexOf(state.tab), THEME.color.gold));
+  pane.add(tabsRow(renderer, RESPONSE_TABS, tabIndexOf(state.tab), THEME.color.accent));
 
   if (state.view.kind === "result") {
     const { result, extraSecrets } = state.view;
@@ -64,7 +64,7 @@ export function renderResponsePane(
       pane.add(
         new TextRenderable(renderer, {
           content: `warning: followed redirect; response describes ${scrubSecrets(result.outcome.redirectedTo, secrets)}`,
-          fg: THEME.color.dim,
+          fg: THEME.color.gold,
           wrapMode: "word",
           width: "100%",
         }),
@@ -73,7 +73,7 @@ export function renderResponsePane(
     // Non-2xx sends carry the pipeline's named rejection; it surfaces on the
     // diagnostic region exactly as the CLI prints it on stderr.
     if (result.outcome.kind === "rejected" && result.outcome.error !== undefined) {
-      pane.add(diagnosticText(renderer, errorLine(result.outcome.error), THEME.color.accent));
+      pane.add(diagnosticText(renderer, errorLine(result.outcome.error), THEME.color.love));
     }
     // A send can settle after the user opened a different request; label the
     // staleness instead of silently conflating two requests' responses.
@@ -86,14 +86,14 @@ export function renderResponsePane(
         diagnosticText(
           renderer,
           `this response is from ${state.view.forName} — ${state.requestName} is loaded now`,
-          THEME.color.dim,
+          THEME.color.muted,
         ),
       );
     }
   } else if (state.view.kind === "error") {
-    pane.add(diagnosticText(renderer, errorLine(state.view.error), THEME.color.accent));
+    pane.add(diagnosticText(renderer, errorLine(state.view.error), THEME.color.love));
   } else if (state.view.kind === "sending") {
-    pane.add(diagnosticText(renderer, "sending…", THEME.color.dim));
+    pane.add(diagnosticText(renderer, "sending…", THEME.color.muted));
   } else if (state.tab === "tests") {
     // TESTS is meaningful before any send: the workspace's generated tests.
     for (const row of testsView(renderer, state)) pane.add(row);
@@ -101,13 +101,13 @@ export function renderResponsePane(
     // The one shared empty-state style, scoped to the area under the
     // status line and tabs.
     renderEmptyState(renderer, pane, [
-      { text: "no response yet", tone: "text" },
-      { text: "select a request in collections and press ⏎", tone: "dim" },
+      { text: "no response yet", tone: "message" },
+      { text: "select a request in collections and press ⏎", tone: "hint" },
     ]);
   }
 
   if (state.note !== null) {
-    pane.add(diagnosticText(renderer, state.note, THEME.color.dim));
+    pane.add(diagnosticText(renderer, state.note, THEME.color.muted));
   }
 }
 
@@ -135,8 +135,9 @@ function statusLine(
     if (chunks.length === 0) return null;
     return new TextRenderable(renderer, {
       content: new StyledText([fg(THEME.color.text)(" "), ...chunks, fg(THEME.color.text)(" ")]),
-      // An opaque background: the spaces must blank the border line under them.
-      bg: THEME.color.bg,
+      // An opaque background: the spaces must blank the border line under
+      // them (the pane's own fill, which its frame row sits on).
+      bg: THEME.color.panel,
       position: "absolute",
       top: -1,
       right: 1,
@@ -147,7 +148,7 @@ function statusLine(
     justifyContent: "space-between",
     width: "100%",
   });
-  row.add(new TextRenderable(renderer, { content: new StyledText([bold(fg(THEME.color.bright)("RESPONSE"))]) }));
+  row.add(new TextRenderable(renderer, { content: new StyledText([bold(fg(THEME.color.text)("RESPONSE"))]) }));
   if (chunks.length > 0) row.add(new TextRenderable(renderer, { content: new StyledText(chunks) }));
   return row;
 }
@@ -172,25 +173,17 @@ function statusChunks(state: ResponseRenderState): TextChunk[] {
       fg(THEME.color.text)(formatBytes(outcome.response.size)),
     ];
   }
-  if (state.view.kind === "error") return [bold(fg(THEME.color.accent)("✗ error"))];
-  if (state.view.kind === "sending") return [dim("sending…")];
+  if (state.view.kind === "error") return [bold(fg(THEME.color.love)("✗ error"))];
+  if (state.view.kind === "sending") return [fg(THEME.color.muted)("sending…")];
   return [];
 }
 
 function statusChunk(status: number): TextChunk {
   const label = `${status} ${reasonPhrase(status)}`.trimEnd();
-  if (status >= 200 && status < 300) {
-    // Gold is the theme's response-highlight color; success earns it.
-    return bold(fg(THEME.color.gold)(label));
-  }
-  if (status >= 400) {
-    return bold(fg(THEME.color.accent)(label));
-  }
+  // Foam is success; love is the palette's only red, kept for failures.
+  if (status >= 200 && status < 300) return bold(fg(THEME.color.foam)(label));
+  if (status >= 400) return bold(fg(THEME.color.love)(label));
   return bold(fg(THEME.color.text)(label));
-}
-
-function dim(text: string): TextChunk {
-  return fg(THEME.color.dim)(text);
 }
 
 /** Uppercased reason phrase for the codes a human actually meets; else bare code. */
@@ -267,7 +260,7 @@ function bodyView(
   } else {
     note = `${response.shape} · ${response.size} bytes (complete)`;
   }
-  const noteText = new TextRenderable(renderer, { content: note, fg: THEME.color.dim, width: "100%" });
+  const noteText = new TextRenderable(renderer, { content: note, fg: THEME.color.muted, width: "100%" });
   if (response.excerpt === "") return [noteText];
   return [noteText, codeBlock(renderer, highlighted(excerpt, response.truncated))];
 }
@@ -305,26 +298,26 @@ function testsView(
   if (state.requestName === null) {
     return [
       emptyStateBox(renderer, [
-        { text: "no request selected", tone: "text" },
-        { text: "open one in collections (⏎)", tone: "dim" },
+        { text: "no request selected", tone: "message" },
+        { text: "open one in collections (⏎)", tone: "hint" },
       ]),
     ];
   }
   if (state.tests.forName !== state.requestName) {
     // The listing in hand belongs to a different (or previous) request —
     // a fresh read is in flight; say so instead of showing stale files.
-    return [diagnosticText(renderer, "reading tests…", THEME.color.dim)];
+    return [diagnosticText(renderer, "reading tests…", THEME.color.muted)];
   }
   if (state.tests.error !== undefined) {
-    return [diagnosticText(renderer, errorLine(state.tests.error), THEME.color.accent)];
+    return [diagnosticText(renderer, errorLine(state.tests.error), THEME.color.love)];
   }
   if (state.tests.files.length === 0) {
     // The honest empty state the ticket asks for, worded like the CLI's hint,
     // in the one shared empty-state style.
     return [
       emptyStateBox(renderer, [
-        { text: `no generated tests for ${state.requestName}`, tone: "text" },
-        { text: "run postui gen", tone: "bright" },
+        { text: `no generated tests for ${state.requestName}`, tone: "message" },
+        { text: "run postui gen", tone: "command" },
       ]),
     ];
   }

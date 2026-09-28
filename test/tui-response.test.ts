@@ -65,31 +65,31 @@ describe("response pane", () => {
     server.close();
   });
 
-  test("the status line colors success codes gold and shows latency and size", async () => {
+  test("the status line colors success codes foam and shows latency and size", async () => {
     const server = serve(() => new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const app = await setupApp({ "ok.ts": moduleSource("GET", server.url("/")) });
     await sendFromApp(app);
-    const gold = RGBA.fromHex(THEME.color.gold);
+    const foam = RGBA.fromHex(THEME.color.foam);
     const spans = app.captureSpans().lines.flatMap(line => line.spans);
     const status = spans.find(span => span.text.includes("200 OK"));
-    expect(status?.fg.equals(gold)).toBe(true);
+    expect(status?.fg.equals(foam)).toBe(true);
     const text = frameText(app, HEIGHT);
     expect(text).toMatch(/\d+ ms/);
     expect(text).toContain("11 B"); // exact byte size of {"ok":true}
     server.close();
   });
 
-  test("error statuses render in the accent red, not gold", async () => {
+  test("error statuses render in love, never the accent", async () => {
     const server = serve(() => new Response("no", { status: 403 }));
     const app = await setupApp({ "no.ts": moduleSource("GET", server.url("/")) });
     await sendFromApp(app);
+    const love = RGBA.fromHex(THEME.color.love);
     const accent = RGBA.fromHex(THEME.color.accent);
-    const gold = RGBA.fromHex(THEME.color.gold);
     const spans = app.captureSpans().lines.flatMap(line => line.spans);
     // "403 FORBIDDEN", not bare "403": the server's random port may hold those digits.
     const status = spans.find(span => span.text.includes("403 FORBIDDEN"));
-    expect(status?.fg.equals(accent)).toBe(true);
-    expect(status?.fg.equals(gold)).toBe(false);
+    expect(status?.fg.equals(love)).toBe(true);
+    expect(status?.fg.equals(accent)).toBe(false);
     server.close();
   });
 

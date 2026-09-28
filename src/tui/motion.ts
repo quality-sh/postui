@@ -2,13 +2,14 @@ import { createTimeline, engine } from "@opentui/core";
 import type { BoxRenderable, CliRenderer, Timeline } from "@opentui/core";
 
 /**
- * Motion layer: short border-color sweeps on the transitions the app already
+ * Motion layer: short color sweeps on the transitions the app already
  * paints instantly — selection moves, pane focus changes, status-bar mode
- * changes. Everything is one property (borderColor) written a few times over
- * ~150ms: visible in the terminal, invisible in the frame budget, and
- * skippable — without the timeline engine attached (tests, headless runs)
- * every sweep lands its end state synchronously, so callers never need to
- * care whether motion ran.
+ * changes. Everything is one color property (a frame's borderColor, or a
+ * borderless box's backgroundColor) written a few times over ~150ms:
+ * visible in the terminal, invisible in the frame budget, and skippable —
+ * without the timeline engine attached (tests, headless runs) every sweep
+ * lands its end state synchronously, so callers never need to care whether
+ * motion ran.
  */
 
 /** Parse #rrggbb into channels; returns null for anything else. */
@@ -41,7 +42,7 @@ export function blendHex(a: string, b: string, t: number): string {
   return `#${toByte(r0 + (r1 - r0) * clamped)}${toByte(g0 + (g1 - g0) * clamped)}${toByte(b0 + (b1 - b0) * clamped)}`;
 }
 
-/** A border sweep's timing. Short by design: motion confirms, never performs. */
+/** A sweep's timing. Short by design: motion confirms, never performs. */
 const SWEEP_MS = 150;
 
 let rendererAttached = false;
@@ -63,9 +64,24 @@ export function attachMotion(renderer: CliRenderer): () => void {
 export function detachMotion(): void {
   // Deleting the current entry during Map iteration is safe (spec-defined),
   // so no snapshot copy is needed.
-  for (const [pane, sweep] of live) finalize(pane, sweep, sweep.to);
+  for (const channel of CHANNELS) {
+    for (const [box, sweep] of live[channel]) finalize(channel, box, sweep, sweep.to);
+  }
   engine.detach();
   rendererAttached = false;
+}
+
+/** The color property a sweep drives: the frame, or the box's fill. */
+type Channel = "border" | "fill";
+
+const CHANNELS: readonly Channel[] = ["border", "fill"];
+
+function paint(channel: Channel, box: BoxRenderable, color: string): void {
+  // A re-render destroys the boxes it replaces; a sweep still running on
+  // one of them has nothing left to paint.
+  if (box.isDestroyed) return;
+  if (channel === "border") box.borderColor = color;
+  else box.backgroundColor = color;
 }
 
 interface LiveSweep {
@@ -76,14 +92,21 @@ interface LiveSweep {
   readonly state: { t: number };
 }
 
-/** One live sweep per renderable: a new sweep replaces the running one. */
-const live = new Map<BoxRenderable, LiveSweep>();
+/** One live sweep per renderable and channel: a new sweep replaces the running one. */
+const live: Record<Channel, Map<BoxRenderable, LiveSweep>> = {
+  border: new Map(),
+  fill: new Map(),
+};
 
-function finalize(pane: BoxRenderable, sweep: LiveSweep, endColor: string): void {
+function stop(channel: Channel, box: BoxRenderable, sweep: LiveSweep): void {
   sweep.timeline.pause();
   engine.unregister(sweep.timeline);
-  live.delete(pane);
-  pane.borderColor = endColor;
+  live[channel].delete(box);
+}
+
+function finalize(channel: Channel, box: BoxRenderable, sweep: LiveSweep, endColor: string): void {
+  stop(channel, box, sweep);
+  paint(channel, box, endColor);
 }
 
 /**
@@ -93,12 +116,8 @@ function finalize(pane: BoxRenderable, sweep: LiveSweep, endColor: string): void
  * repaint the stale end color over the newer state.
  */
 export function settleBorder(pane: BoxRenderable, color: string): void {
-  const running = live.get(pane);
-  if (running !== undefined) {
-    running.timeline.pause();
-    engine.unregister(running.timeline);
-    live.delete(pane);
-  }
+  const running = live.border.get(pane);
+  if (running !== undefined) stop("border", pane, running);
   pane.borderColor = color;
 }
 
@@ -116,14 +135,38 @@ export function sweepBorder(
   to: string,
   durationMs: number = SWEEP_MS,
 ): boolean {
-  const running = live.get(pane);
+  return startSweep("border", pane, from, to, durationMs);
+}
+
+/**
+ * The same sweep on a box's background, for chrome with no frame to sweep:
+ * the selected row's fill, the borderless status bar.
+ */
+export function sweepFill(
+  box: BoxRenderable,
+  from: string,
+  to: string,
+  durationMs: number = SWEEP_MS,
+): boolean {
+  return startSweep("fill", box, from, to, durationMs);
+}
+
+function startSweep(
+  channel: Channel,
+  box: BoxRenderable,
+  from: string,
+  to: string,
+  durationMs: number,
+): boolean {
+  const lives = live[channel];
+  const running = lives.get(box);
   const start =
     running === undefined
       ? from
       : blendHex(running.from, running.to, running.state.t);
-  if (running !== undefined) finalize(pane, running, start);
+  if (running !== undefined) finalize(channel, box, running, start);
   if (!rendererAttached) {
-    pane.borderColor = to;
+    paint(channel, box, to);
     return false;
   }
   const state = { t: 0 };
@@ -133,14 +176,14 @@ export function sweepBorder(
     duration: durationMs,
     ease: "outQuad",
     onUpdate: () => {
-      pane.borderColor = blendHex(start, to, state.t);
+      paint(channel, box, blendHex(start, to, state.t));
     },
     onComplete: () => {
-      pane.borderColor = to;
+      paint(channel, box, to);
       engine.unregister(timeline);
-      if (live.get(pane)?.timeline === timeline) live.delete(pane);
+      if (lives.get(box)?.timeline === timeline) lives.delete(box);
     },
   });
-  live.set(pane, { timeline, from: start, to, state });
+  lives.set(box, { timeline, from: start, to, state });
   return true;
 }
