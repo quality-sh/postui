@@ -69,6 +69,12 @@ export interface ComposerPane {
   send(bodyWindow?: number): boolean;
   /** Handle a keypress while the pane is focused; true = consumed. */
   handleKey(key: ComposerKey): boolean;
+  /**
+   * A bracketed paste: typed into the focused text field as if keyed in.
+   * Line breaks survive only in the body (elsewhere Enter would send).
+   * False when no text field has the keys.
+   */
+  paste(text: string): boolean;
   /** Tell the composer which pane has app focus (field focus shows only when it is this one). */
   syncFocus(focusedPaneId: string | null): void;
   /** Resolves when the send or save currently in flight (if any) has settled. */
@@ -204,6 +210,18 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     }
   };
 
+  const paste = (text: string): boolean => {
+    if (!isEditingText(editor)) return false;
+    const multiline = editor.field === "content" && editor.tab === "body";
+    for (const ch of text.replace(/\r\n?/g, "\n")) {
+      if (ch === "\n" && !multiline) continue;
+      editorKey(editor, ch === "\n" ? { name: "return", ctrl: false } : { name: ch, ctrl: false, sequence: ch });
+    }
+    state.message = null;
+    render();
+    return true;
+  };
+
   const handleKey = (key: ComposerKey): boolean => {
     if (key.ctrl && key.name === "c") return false; // ctrl+c stays a shell-level quit
     const effect = editorKey(editor, key);
@@ -251,6 +269,7 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     },
     send,
     handleKey,
+    paste,
     syncFocus(focusedPaneId: string | null): void {
       const focused = focusedPaneId === COMPOSER_PANE_ID;
       if (focused === state.focused) return;

@@ -26,9 +26,10 @@ const SEND: KeyHint = { key: "enter", label: "send", glyph: "⏎" };
 const FOCUS: KeyHint = { key: "tab", label: "focus" };
 const SEARCH: KeyHint = { key: "/", label: "search" };
 const QUIT: KeyHint = { key: "q", label: "quit" };
+const IMPORT: KeyHint = { key: "ctrl+n", label: "import", glyph: "^n" };
 
 /** Hints when no registered pane has focus (and for the collections pane). */
-export const DEFAULT_KEY_HINTS: readonly KeyHint[] = [SELECT, SEND, FOCUS, SEARCH, QUIT];
+export const DEFAULT_KEY_HINTS: readonly KeyHint[] = [SELECT, SEND, FOCUS, SEARCH, IMPORT, QUIT];
 
 /**
  * Status-bar hints per pane id, in display order. The ids are the panes'
@@ -55,7 +56,7 @@ export function hintsFor(paneId: string | null): readonly KeyHint[] {
 }
 
 /** App-level actions the shell itself handles. */
-export type GlobalAction = "quit" | "focus-next" | "focus-previous" | "search";
+export type GlobalAction = "quit" | "focus-next" | "focus-previous" | "search" | "import";
 
 /** Minimal shape of a parsed keypress (a subset of OpenTUI's KeyEvent). */
 export interface ParsedKeyLike {
@@ -76,6 +77,7 @@ export function globalAction(
   context: GlobalKeyContext = {},
 ): GlobalAction | null {
   if (key.ctrl && key.name === "c") return "quit";
+  if (key.ctrl && key.name === "n") return "import";
   if (key.name === "tab") return key.shift === true ? "focus-previous" : "focus-next";
   // Panes with a text input (composer fields, search) consume printable keys
   // before they reach this map. The context check is the backstop: with a

@@ -8,6 +8,7 @@ import {
   renderError,
   renderNoMatches,
   requestRow,
+  treeBranch,
 } from "./collections-render.ts";
 import { groupByCollection } from "./collection-groups.ts";
 import { blendHex, sweepBorder } from "./motion.ts";
@@ -205,16 +206,15 @@ export function startCollectionsPane(
     const rows = flatRows();
     const windowEnd = state.firstVisible + visibleRows();
     let top = 0; // terminal row where the current entry starts
-    for (const row of rows) {
+    for (const [rowIndex, row] of rows.entries()) {
       const height = row.kind === "header" ? 1 : REQUEST_ROW_HEIGHT;
       // Only fully visible entries render: the pane does not clip overflow.
       if (top >= state.firstVisible && top + height <= windowEnd) {
         if (row.kind === "header") pane.add(headerRow(renderer, row.title));
         else {
           const selected = row.index === state.cursor;
-          const rowBox = requestRow(renderer, row.request, selected, request =>
-            selectRequest(request.name),
-          );
+          const onSelect = (request: LoadedRequest): void => selectRequest(request.name);
+          const rowBox = requestRow(renderer, row.request, selected, onSelect, treeBranch(rows, rowIndex));
           if (selected) highlightedRow = rowBox;
           pane.add(rowBox);
         }

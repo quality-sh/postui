@@ -19,6 +19,7 @@ describe("PANE_KEY_HINTS", () => {
       "⏎ send",
       "tab focus",
       "/ search",
+      "^n import",
       "q quit",
     ]);
   });

@@ -235,4 +235,27 @@ describe("composer editing", () => {
     expect(frameText(app, HEIGHT)).toContain("https://api.dev/usersx");
     expect(frameText(app, HEIGHT)).not.toContain("https://api.dev/health");
   });
+
+  test("a bracketed paste types into the URL; its line break never sends", async () => {
+    const app = await setupApp({ "one.ts": moduleSource("GET", "http://never-reached.test/") });
+    await openFirstRequest(app);
+    await focusComposer(app);
+    await app.mockInput.pasteBracketedText("users?page=2\r");
+    await settle(app);
+    expect(frameText(app, HEIGHT)).toContain("http://never-reached.test/users?page=2");
+    expect(frameText(app, HEIGHT)).toContain("no response yet");
+    expect(app.shell.composer.edited).toBe(true);
+  });
+
+  test("a bracketed paste into the body keeps its line breaks", async () => {
+    const app = await setupApp({ "one.ts": moduleSource("POST", "http://never-reached.test/") });
+    await openFirstRequest(app);
+    await focusComposer(app);
+    await arrows(app, "down", "down"); // URL → tab strip (BODY) → body
+    await app.mockInput.pasteBracketedText('{\r  "name": "Ada"\r}');
+    await settle(app);
+    const frame = frameText(app, HEIGHT);
+    expect(frame).toContain('2 │   "name": "Ada"');
+    expect(frame).toContain("3 │ }");
+  });
 });

@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
-import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
-import type { CliRenderer, MouseEvent } from "@opentui/core";
+import { BoxRenderable, decodePasteBytes, stripAnsiSequences } from "@opentui/core";
+import type { CliRenderer, MouseEvent, PasteEvent } from "@opentui/core";
 import { COLLECTIONS_PANE_ID, startCollectionsPane } from "./collections.ts";
 import type { CollectionsPane } from "./collections.ts";
 import { COMPOSER_PANE_ID, startComposerPane } from "./composer.ts";
@@ -8,10 +8,11 @@ import type { ComposerPane } from "./composer.ts";
 import { RESPONSE_PANE_ID, startResponsePane } from "./response-pane.ts";
 import type { ResponsePane } from "./response-pane.ts";
 import { FocusRegistry } from "./focus.ts";
+import { attachImportPrompt } from "./import.ts";
 import { globalAction, hintsFor } from "./keymap.ts";
 import type { GlobalAction, ParsedKeyLike } from "./keymap.ts";
+import { buildHeader } from "./header.ts";
 import { settleBorder, sweepBorder } from "./motion.ts";
-import { halftoneBox } from "./render.ts";
 import { startStatusBar } from "./status-bar.ts";
 import type { SearchBarState, StatusBarMode } from "./status-bar.ts";
 import { THEME } from "./theme.ts";
@@ -331,7 +332,9 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     }
   };
 
+  const importer = attachImportPrompt(renderer, root, { requestsDir: options.requestsDir, collections, composer, response, focusPane, endSearch });
   const keyListener = (key: ParsedKeyLike): void => {
+    if (importer.handleKey(key)) return; // ctrl+n opens it; while open it owns the keys
     if (search.active && searchKey(key)) return;
     if (focus.focused === COLLECTIONS_PANE_ID && collections.handleKey(key)) return;
     if (focus.focused === COMPOSER_PANE_ID && composer.handleKey(key)) return;
@@ -339,7 +342,13 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     const action = globalAction(key, { textFocused: textFocused() });
     if (action !== null) applyGlobalAction(action);
   };
+  // Pastes the import prompt did not take go to a focused composer text field.
+  const pasteListener = (event: PasteEvent): void => {
+    if (event.defaultPrevented || focus.focused !== COMPOSER_PANE_ID) return;
+    if (composer.paste(stripAnsiSequences(decodePasteBytes(event.bytes)))) event.preventDefault();
+  };
   renderer.keyInput.on("keypress", keyListener);
+  renderer.keyInput.on("paste", pasteListener);
   repaintStatusBar();
 
   return {
@@ -353,60 +362,7 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     onQuit,
     dispose: () => {
       renderer.keyInput.off("keypress", keyListener);
+      renderer.keyInput.off("paste", pasteListener);
     },
   };
 }
-
-/** Header bar: POSTUI wordmark + halftone left, workspace center, env badge right. */
-function buildHeader(renderer: CliRenderer, options: ShellOptions): BoxRenderable {
-  const header = new BoxRenderable(renderer, {
-    flexDirection: "row",
-    alignItems: "center",
-    border: true,
-    borderColor: THEME.color.border,
-    backgroundColor: THEME.color.bg,
-    paddingX: 1,
-    height: 3,
-    width: "100%",
-  });
-
-  const left = new BoxRenderable(renderer, {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-    width: "33%",
-  });
-  left.add(
-    new TextRenderable(renderer, {
-      content: new StyledText([bold(fg(THEME.color.accent)("P O S T U I"))]),
-    }),
-  );
-  // The mockup's halftone strip fading out beside the wordmark.
-  left.add(halftoneBox(renderer, 16, 1, "top-left"));
-  header.add(left);
-
-  const center = new BoxRenderable(renderer, {
-    alignItems: "center",
-    justifyContent: "center",
-    width: "34%",
-  });
-  center.add(
-    new TextRenderable(renderer, { content: options.workspaceName, fg: THEME.color.text }),
-  );
-  header.add(center);
-
-  const right = new BoxRenderable(renderer, {
-    alignItems: "center",
-    justifyContent: "flex-end",
-    width: "33%",
-  });
-  right.add(
-    new TextRenderable(renderer, {
-      content: new StyledText([bold(fg(THEME.color.accent)(options.envBadge))]),
-    }),
-  );
-  header.add(right);
-
-  return header;
-}
-

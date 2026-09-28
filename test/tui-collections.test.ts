@@ -147,16 +147,10 @@ describe("collections pane", () => {
   });
 
   test("only the selected row is boxed; the others hang off the tree guide", async () => {
-    const setup = await setupCollections({
-      "one.ts": moduleSource("POST", "https://api.dev/users"),
-      "three.ts": moduleSource("GET", "https://api.dev/users"),
-      "two.ts": moduleSource("GET", "https://api.dev/users"),
-    });
-    // The collections pane is the frame's first 30 columns; inside its
-    // border, exactly one box top — the selection's — may appear.
-    const paneLines = frameText(setup, HEIGHT)
-      .split("\n")
-      .map(line => line.slice(1, 29));
+    const get = moduleSource("GET", "https://api.dev/users");
+    const setup = await setupCollections({ "one.ts": moduleSource("POST", "https://api.dev/users"), "three.ts": get, "two.ts": get });
+    // Inside the pane's border (the first 30 columns) only the selection's box top shows.
+    const paneLines = frameText(setup, HEIGHT).split("\n").map(line => line.slice(1, 29));
     expect(paneLines.filter(line => line.includes("┌"))).toHaveLength(1);
     expect(rowContaining(setup, "▶")).toContain("▶│ POST  one");
     expect(rowContaining(setup, "three")).toContain("├ GET   three");
