@@ -1,5 +1,6 @@
 import { BoxRenderable, StyledText, TextRenderable, bg, bold, fg } from "@opentui/core";
 import type { CliRenderer, TextChunk } from "@opentui/core";
+import { blendHex } from "./motion.ts";
 import { halftoneBox } from "./render.ts";
 import { THEME } from "./theme.ts";
 
@@ -63,18 +64,16 @@ export function buildHeader(
 }
 
 /**
- * The spaced wordmark, one bloom color per letter (the develop effect's
- * palette, so the brand and the reveals share their colors). The walk
- * starts on the palette's last color, the accent, so the mark opens in
- * iris before it warms.
+ * The spaced wordmark, fading iris to rose across its letters: calm, and
+ * never the error red (love) the bloom palette also carries.
  */
 function wordmark(word: string): TextChunk[] {
   const chunks: TextChunk[] = [];
-  const palette = THEME.bloom;
-  [...word].forEach((letter, index) => {
+  const letters = [...word];
+  letters.forEach((letter, index) => {
     if (index > 0) chunks.push(fg(THEME.color.panel)(" "));
-    const color = palette[(index + palette.length - 1) % palette.length] ?? THEME.color.accent;
-    chunks.push(bold(fg(color)(letter)));
+    const t = letters.length > 1 ? index / (letters.length - 1) : 0;
+    chunks.push(bold(fg(blendHex(THEME.color.accent, THEME.color.rose, t))(letter)));
   });
   return chunks;
 }

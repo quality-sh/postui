@@ -1,34 +1,12 @@
 import { RGBA } from "@opentui/core";
 import { blendHex } from "../motion.ts";
+import { THEME } from "../theme.ts";
 
-/**
- * The fx module's colours, straight from design/feel-spec.md §1. They live
- * here only while theme.ts is being rewritten to the same palette; at merge
- * they fold into THEME and this file reads from there.
- */
-export const FX = {
-  bg: "#100f17",
-  panel: "#15131e",
-  element: "#1d1a28",
-  text: "#e0def4",
-  muted: "#908caa",
-  dim: "#6e6a86",
-  fog: "#3e3a52",
-  accent: "#c4a7e7",
-  love: "#eb6f92",
-  foam: "#9ccfd8",
-  gold: "#f6c177",
-} as const;
+/** The fx module's colours: views onto THEME, the one source of colour truth. */
+export const FX = THEME.color;
 
 /** The develop effect's bloom colours (provenance hero, Rosé Pine) plus the accent. */
-export const BLOOM: readonly string[] = [
-  "#eb6f92",
-  "#c4a56a",
-  "#908caa",
-  "#ea9a97",
-  "#935e6d",
-  FX.accent,
-];
+export const BLOOM: readonly string[] = THEME.bloom;
 
 const cache = new Map<string, RGBA>();
 

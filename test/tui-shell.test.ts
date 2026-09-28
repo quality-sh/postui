@@ -101,19 +101,16 @@ describe("postui tui shell", () => {
     expect(text).toContain("postui save");
   });
 
-  test("the wordmark's letters walk the bloom palette, opening on the accent", async () => {
+  test("the wordmark fades iris to rose, never the error red", async () => {
     const setup = await setupShell();
     await setup.renderOnce();
     expect(rowContaining(setup, "P O S T U I")).not.toBeNull();
     const spans = flatSpans(setup);
     const letter = (text: string) => spans.find((span) => span.text === text);
     expect(letter("P")?.fg.equals(RGBA.fromHex(THEME.color.accent))).toBe(true);
-    // Six letters, six different bloom colors.
-    const colors = ["P", "O", "S", "T", "U", "I"].map((text) =>
-      THEME.bloom.findIndex((color) => letter(text)?.fg.equals(RGBA.fromHex(color)) === true),
-    );
-    expect(colors.every((index) => index >= 0)).toBe(true);
-    expect(new Set(colors).size).toBe(6);
+    expect(letter("I")?.fg.equals(RGBA.fromHex(THEME.color.rose))).toBe(true);
+    const love = RGBA.fromHex(THEME.color.love);
+    for (const text of ["P", "O", "S", "T", "U", "I"]) expect(letter(text)?.fg.equals(love)).toBe(false);
   });
 
   test("the focused pane's border repaints in accent while other chrome stays muted", async () => {
