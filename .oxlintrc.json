@@ -4,7 +4,7 @@
     "correctness": "error",
     "suspicious": "error"
   },
-  "ignorePatterns": ["dist"],
+  "ignorePatterns": ["dist", ".claude"],
   "rules": {
     "complexity": ["error", { "max": 15 }],
     "max-depth": ["error", { "max": 4 }],
