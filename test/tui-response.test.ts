@@ -86,7 +86,8 @@ describe("response pane", () => {
     const accent = RGBA.fromHex(THEME.color.accent);
     const gold = RGBA.fromHex(THEME.color.gold);
     const spans = app.captureSpans().lines.flatMap(line => line.spans);
-    const status = spans.find(span => span.text.includes("403"));
+    // "403 FORBIDDEN", not bare "403": the server's random port may hold those digits.
+    const status = spans.find(span => span.text.includes("403 FORBIDDEN"));
     expect(status?.fg.equals(accent)).toBe(true);
     expect(status?.fg.equals(gold)).toBe(false);
     server.close();
@@ -158,8 +159,11 @@ describe("response pane", () => {
     await app.renderOnce();
     const wider = frameText(app, HEIGHT);
     expect(hits).toBe(2); // widening re-sends: the CLI's --body-bytes semantics
-    expect(wider).toContain(tail); // now within the window
     expect(wider).toContain("(complete)");
+    for (const _ of Array.from({ length: 10 })) app.mockInput.pressArrow("down");
+    await app.flush();
+    await app.renderOnce();
+    expect(frameText(app, HEIGHT)).toContain(tail); // now within the window (scrolled to)
     server.close();
   });
 

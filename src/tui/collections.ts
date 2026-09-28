@@ -12,10 +12,7 @@ import {
 import { groupByCollection } from "./collection-groups.ts";
 import { blendHex, sweepBorder } from "./motion.ts";
 import type { ParsedKeyLike } from "./keymap.ts";
-import {
-  flattenRows,
-  steppedRequestRow,
-} from "./collections-rows.ts";
+import { flattenRows, steppedRequestRow } from "./collections-rows.ts";
 import type { FlatRow } from "./collections-rows.ts";
 import { visibleRowCount, windowForCursor } from "./collections-window.ts";
 import { clearChildren, DECOR_SIZE, halftoneTail } from "./render.ts";
@@ -26,10 +23,13 @@ import { readWorkspace } from "./workspace.ts";
 /** The pane id used in the shell's focus registry (tab order). */
 export const COLLECTIONS_PANE_ID = "collections";
 
+/** Cursor keys: ↑/↓, with j/k as silent aliases. */
+const CURSOR_KEYS: Readonly<Record<string, 1 | -1>> = { down: 1, j: 1, up: -1, k: -1 };
+
 export interface CollectionsPaneOptions {
   /** The workspace's requests folder; re-read on every focus regain. */
   readonly requestsDir: string;
-  /** Enter on a request hands it to the shell (the composer loads it). */
+  /** Opening a request hands it to the shell (the composer loads it). */
   readonly onOpen: (request: LoadedRequest) => void;
   /**
    * The open selection's module vanished from disk (refresh noticed); the
@@ -44,8 +44,9 @@ export interface CollectionsPaneOptions {
   readonly onReload?: (request: LoadedRequest) => void;
   /**
    * Send the composer's current draft through the pipeline; returns whether
-   * a send started. Used by enter-on-an-already-open request (the status
-   * bar's "⏎ send" holds from the tree too — no tab required).
+   * a send started. Enter in the tree calls it right after opening the
+   * highlighted request — or alone when that request is already open, so an
+   * edited draft is sent as edited, never reloaded.
    */
   readonly onSend?: () => boolean;
   /**
@@ -67,8 +68,14 @@ export interface CollectionsPane {
   /** Handle a keypress while the pane is focused; true = consumed. */
   handleKey(key: ParsedKeyLike): boolean;
   /**
+   * Open the highlighted request in the composer WITHOUT sending it (the
+   * search palette's "⏎ open"). A request that is already open is left
+   * alone, so its draft keeps any edits. Resolves once the open has landed.
+   */
+  openHighlighted(): Promise<void>;
+  /**
    * Highlight a specific request (mouse click-to-select): the cursor moves
-   * to it in the current list's index space, exactly where j/k would land.
+   * to it in the current list's index space, exactly where ↑/↓ would land.
    */
   selectRequest(name: string): void;
   /** Called by the shell after every focus change; refreshes on regaining focus. */
@@ -85,7 +92,7 @@ export interface CollectionsPane {
   endFilter(): void;
   /**
    * Navigation keys inside filter mode (up/down move the match highlight,
-   * enter opens it through the pane's own enter path); true = consumed.
+   * enter opens it without sending); true = consumed.
    */
   filterKey(key: ParsedKeyLike): boolean;
   /** True while the search filter is active. */
@@ -95,8 +102,10 @@ export interface CollectionsPane {
 }
 
 /**
- * The collections pane: every saved request grouped by collection, j/k
- * navigation with wrap-around, enter to open the request in the composer.
+ * The collections pane: every saved request grouped by collection, ↑/↓
+ * navigation with wrap-around (j/k as silent aliases), enter to open the
+ * request in the composer and send it in one step — focus stays here, so
+ * ↓ ⏎ ↓ ⏎ walks the list firing each request.
  * All data comes from readWorkspace() (the shared loader); a refresh on
  * every focus regain makes hand edits and deletions appear without a
  * restart, and a vanished selection clears honestly instead of jumping.
@@ -118,7 +127,7 @@ export function startCollectionsPane(
   const state = {
     groups: [] as ReturnType<typeof groupByCollection>,
     items: [] as LoadedRequest[],
-    /** Highlighted request (moves with j/k), as an index into the shown list. */
+    /** Highlighted request (moves with ↑/↓), as an index into the shown list. */
     cursor: null as number | null,
     /** The request currently open in the composer, tracked by module name. */
     selectedName: null as string | null,
@@ -241,7 +250,7 @@ export function startCollectionsPane(
     state.firstVisible = windowForCursor(rows, rowIndex, visibleRows(), state.firstVisible);
   };
 
-  /** j/k: the cursor walks the pane's DISPLAYED request order, with wrap-around. */
+  /** ↑/↓: the cursor walks the pane's DISPLAYED request order, with wrap-around. */
   const moveCursor = (delta: 1 | -1): void => {
     const row = steppedRequestRow(flatRows(), state.cursor, delta);
     if (row !== null) state.cursor = row.index;
@@ -250,7 +259,7 @@ export function startCollectionsPane(
     pulseHighlighted();
   };
 
-  /** Mouse click-to-select: the cursor lands on the clicked row, wherever j/k would have put it. */
+  /** Mouse click-to-select: the cursor lands on the clicked row, wherever ↑/↓ would have put it. */
   const selectRequest = (name: string): void => {
     const index = shown().findIndex(item => item.name === name);
     if (index === -1) return;
@@ -263,12 +272,17 @@ export function startCollectionsPane(
     options.onInteract?.();
   };
 
-  const openSelected = (name: string): Promise<void> =>
+  /**
+   * Hand the named request to the composer, then (with `send`) fire it.
+   * Queued behind any refresh, so the send always follows its own load.
+   */
+  const openSelected = (name: string, send: boolean): Promise<void> =>
     enqueue(async () => {
       const request = state.items.find(item => item.name === name);
       if (request === undefined) return; // deleted while queued — refresh already handled it
       state.selectedName = name;
       options.onOpen(request);
+      if (send) options.onSend?.();
     });
 
   /**
@@ -325,40 +339,38 @@ export function startCollectionsPane(
 
   const refresh = (): Promise<void> => enqueue(runRefresh);
 
+  /** The request the highlight sits on, in whichever list is shown. */
+  const highlighted = (): LoadedRequest | undefined =>
+    state.cursor === null ? undefined : shown()[state.cursor];
+
   /** The module name the highlight sits on, in whichever list is shown. */
-  const cursorName = (): string | null =>
-    state.cursor === null ? null : (shown()[state.cursor]?.name ?? null);
+  const cursorName = (): string | null => highlighted()?.name ?? null;
 
   /**
-   * Open whatever the highlight sits on, through the pane's own path — the
-   * same onOpen handoff browse mode uses, so search-enter and tree-enter
-   * cannot diverge. When the highlight is ALREADY the open request, enter
-   * sends it through the shell's onSend hook instead (the status bar's
-   * "⏎ send" holds from the tree; the module stays loaded, the draft stays
-   * as the user left it). A refused send (one already in flight — the
-   * composer said so) leaves everything untouched.
-   * Used by handleKey and by the shell's search palette.
+   * Open the highlighted request and, with `send`, fire it — enter in the
+   * tree does both in one step; the search palette only opens. A request
+   * that is ALREADY open is never reloaded: enter sends the draft as the
+   * user left it (edits included), and an open-only call leaves it be. A
+   * refused send (one already in flight — the composer says so) changes
+   * nothing.
    */
-  const openHighlighted = (): void => {
-    if (state.cursor === null) return;
-    const request = shown()[state.cursor];
-    if (request === undefined) return;
-    if (state.selectedName === request.name && options.onSend?.() === true) return;
-    void openSelected(request.name);
+  const activateHighlighted = (send: boolean): Promise<void> => {
+    const request = highlighted();
+    if (request === undefined) return tail;
+    if (state.selectedName !== request.name) return openSelected(request.name, send);
+    if (send) options.onSend?.();
+    return tail;
   };
 
   const handleKey = (key: ParsedKeyLike): boolean => {
     if (!state.focused || key.ctrl) return false;
-    if (key.name === "j" || key.name === "down") {
-      moveCursor(1);
-      return true;
-    }
-    if (key.name === "k" || key.name === "up") {
-      moveCursor(-1);
+    const step = CURSOR_KEYS[key.name];
+    if (step !== undefined) {
+      moveCursor(step);
       return true;
     }
     if (key.name === "return" || key.name === "enter") {
-      openHighlighted();
+      void activateHighlighted(true);
       return true;
     }
     return false;
@@ -372,7 +384,7 @@ export function startCollectionsPane(
       return true;
     }
     if (key.name === "return" || key.name === "enter") {
-      openHighlighted();
+      void activateHighlighted(false);
       return true;
     }
     return false;
@@ -426,6 +438,7 @@ export function startCollectionsPane(
     ready: initialLoad,
     settled: () => tail,
     handleKey,
+    openHighlighted: () => activateHighlighted(false),
     selectRequest,
     syncFocus,
     beginFilter,

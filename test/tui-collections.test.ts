@@ -146,20 +146,32 @@ describe("collections pane", () => {
     expect(marker?.fg.equals(accent)).toBe(true);
   });
 
-  test("enter loads the selected request into the composer", async () => {
+  test("enter loads the selected request into the composer and sends it, focus staying put", async () => {
+    const hits: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch: req => {
+        hits.push(`${req.method} ${new URL(req.url).pathname}`);
+        return Response.json({ created: true }, { status: 201 });
+      },
+    });
+    const url = `http://127.0.0.1:${server.port}/users`;
     const setup = await setupCollections({
-      "create-user.ts": moduleSource("POST", "https://api.dev/users", "create-user body marker"),
+      "create-user.ts": moduleSource("POST", url, "create-user body marker"),
     });
     setup.mockInput.pressEnter();
     await setup.flush();
     await setup.shell.collections.settled();
+    await setup.shell.composer.settled();
     await setup.renderOnce();
     const text = frameText(setup, HEIGHT);
     expect(text).toContain("COMPOSER");
     expect(text).toContain("create-user.ts");
-    expect(text).toContain("POST");
-    expect(text).toContain("https://api.dev/users");
     expect(setup.shell.composer.loadedName).toBe("create-user");
+    expect(hits).toEqual(["POST /users"]); // one keypress, one send
+    expect(text).toContain("201 CREATED");
+    expect(setup.shell.focus.focused).toBe(COLLECTIONS_PANE_ID);
+    server.stop(true);
   });
 
   test("refresh-on-focus shows a hand edit without a restart", async () => {
@@ -183,8 +195,7 @@ describe("collections pane", () => {
     const setup = await setupCollections({
       "watched.ts": moduleSource("GET", "https://api.dev/users", "original body marker"),
     });
-    setup.mockInput.pressEnter();
-    await setup.shell.collections.settled();
+    await setup.shell.collections.openHighlighted();
     await setup.renderOnce();
     expect(frameText(setup, HEIGHT)).toContain("https://api.dev/users");
     await writeFile(
@@ -202,8 +213,7 @@ describe("collections pane", () => {
       "alpha.ts": moduleSource("POST", "https://api.dev/users"),
       "beta.ts": moduleSource("GET", "https://api.dev/users"),
     });
-    setup.mockInput.pressEnter(); // load alpha into the composer
-    await setup.shell.collections.settled();
+    await setup.shell.collections.openHighlighted(); // load alpha into the composer
     await setup.renderOnce();
     expect(frameText(setup, HEIGHT)).toContain("alpha.ts");
 
@@ -291,12 +301,14 @@ describe("collections pane", () => {
 
   test("a module deleted between refresh and enter still loads the in-memory draft without a crash", async () => {
     const setup = await setupCollections({
-      "vanishing.ts": moduleSource("POST", "https://api.dev/users"),
+      // Port 9 (discard) refuses at once: the send enter fires fails fast, offline.
+      "vanishing.ts": moduleSource("POST", "http://127.0.0.1:9/users"),
     });
     await rm(join(setup.dir, "vanishing.ts")); // behind the pane's back
     setup.mockInput.pressEnter();
     await setup.flush();
     await setup.shell.collections.settled();
+    await setup.shell.composer.settled();
     await setup.renderOnce();
     const text = frameText(setup, HEIGHT);
     // The draft was already in memory when enter landed; the composer shows

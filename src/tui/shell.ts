@@ -8,7 +8,7 @@ import type { ComposerPane } from "./composer.ts";
 import { RESPONSE_PANE_ID, startResponsePane } from "./response-pane.ts";
 import type { ResponsePane } from "./response-pane.ts";
 import { FocusRegistry } from "./focus.ts";
-import { globalAction } from "./keymap.ts";
+import { globalAction, hintsFor } from "./keymap.ts";
 import type { GlobalAction, ParsedKeyLike } from "./keymap.ts";
 import { settleBorder, sweepBorder } from "./motion.ts";
 import { halftoneBox } from "./render.ts";
@@ -30,6 +30,12 @@ export interface ShellOptions {
    * `tests` folder beside the requests folder.
    */
   readonly testsDir?: string;
+  /**
+   * True while a text field has keyboard focus: "q" and "/" then type
+   * instead of quitting or opening search. Defaults to the composer's
+   * isEditingText() while the composer is focused (when it has one).
+   */
+  readonly isEditingText?: () => boolean;
 }
 
 /** A started shell attached to a renderer. */
@@ -63,9 +69,10 @@ const noop = (): void => {};
  * pane's border in the accent color (the mockup's selected-bar treatment).
  * OpenTUI's native focusable/focusedBorderColor machinery stays unused so
  * there is exactly one source of focus truth. Keys the focused pane owns
- * (j/k in collections; editing, h/l, enter in the composer; +/- and h/l in
- * the response) are offered to the pane first; everything else falls through
- * to the global map.
+ * (arrows and enter in collections; editing, arrows, enter in the composer;
+ * arrows and +/- in the response) are offered to the pane first; everything
+ * else falls through to the global map. The status bar shows the focused
+ * pane's key hints (keymap's PANE_KEY_HINTS) and follows every focus move.
  *
  * The `/` search is shell-level: it opens the palette (status bar becomes
  * the query input, collections shows ranked matches), consumes every key
@@ -135,8 +142,8 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
       // this session; in-memory edits are never clobbered by a refresh.
       if (!composer.edited) composer.load(request);
     },
-    // Enter on the already-open request sends it (the composer stays the
-    // only place a send actually runs; the tree just reaches it).
+    // Enter in the tree opens-and-sends (or just sends the open request):
+    // the composer stays the only place a send actually runs.
     onSend: () => composer.send(),
     // A row click is direct manipulation of collections: focus follows.
     onInteract: () => focusPane(COLLECTIONS_PANE_ID),
@@ -164,7 +171,7 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     if (search.active) mode = "searching";
     else if (sendInFlight) mode = "sending";
     const searchBar: SearchBarState = { query: search.query, matchCount: collections.filteredCount };
-    statusBar.paint(mode, searchBar);
+    statusBar.paint(mode, hintsFor(focus.focused), searchBar);
     // Mode change feedback: a quick accent flash decaying back to the bar.
     if (lastPaintedMode !== null && mode !== lastPaintedMode) {
       sweepBorder(statusBar.pane, THEME.color.accent, THEME.color.border, 220);
@@ -253,7 +260,17 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     focus.focus(id);
     repaintFocus();
     collections.syncFocus(focus.focused);
+    repaintStatusBar(); // the bar shows the focused pane's hints
   };
+
+  /**
+   * The composer's text-field state, read through an optional method so the
+   * shell works with composers that do not report it (yet).
+   */
+  const composerEditing = (): boolean =>
+    focus.focused === COMPOSER_PANE_ID &&
+    (composer as Partial<{ isEditingText(): boolean }>).isEditingText?.() === true;
+  const textFocused = options.isEditingText ?? composerEditing;
 
   /**
    * Mouse click-to-focus: a left click anywhere in a pane (its rows,
@@ -322,7 +339,7 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     if (focus.focused === COLLECTIONS_PANE_ID && collections.handleKey(key)) return;
     if (focus.focused === COMPOSER_PANE_ID && composer.handleKey(key)) return;
     if (focus.focused === RESPONSE_PANE_ID && response.handleKey(key)) return;
-    const action = globalAction(key);
+    const action = globalAction(key, { textFocused: textFocused() });
     if (action !== null) applyGlobalAction(action);
   };
   renderer.keyInput.on("keypress", keyListener);

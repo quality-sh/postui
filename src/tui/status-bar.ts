@@ -1,15 +1,15 @@
 import { BoxRenderable, StyledText, TextRenderable, bold, fg } from "@opentui/core";
 import type { CliRenderer } from "@opentui/core";
-import { GLOBAL_KEYS } from "./keymap.ts";
 import type { KeyHint } from "./keymap.ts";
 import { clearChildren } from "./render.ts";
 import { THEME } from "./theme.ts";
 
 /**
  * The mockup's bottom bar as a mode-aware component: while browsing it is
- * the key map in full-height cells; while searching it becomes the query
- * input (the palette lives where the mockup draws `/ search`); while a send
- * is in flight the send cell says so in the accent color.
+ * the focused pane's key hints in evenly split full-height cells; while
+ * searching it becomes the query input (the palette lives where the mockup
+ * draws `/ search`); while a send is in flight the send cell says so in the
+ * accent color.
  */
 export type StatusBarMode = "browsing" | "searching" | "sending";
 
@@ -21,8 +21,11 @@ export interface SearchBarState {
 
 export interface StatusBar {
   readonly pane: BoxRenderable;
-  /** Repaint the bar for the given mode. */
-  paint(mode: StatusBarMode, search?: SearchBarState): void;
+  /**
+   * Repaint the bar for the given mode. `hints` are the focused pane's key
+   * hints (the shell picks them); `search` feeds the palette cell.
+   */
+  paint(mode: StatusBarMode, hints: readonly KeyHint[], search?: SearchBarState): void;
 }
 
 export function startStatusBar(renderer: CliRenderer): StatusBar {
@@ -36,13 +39,17 @@ export function startStatusBar(renderer: CliRenderer): StatusBar {
     width: "100%",
   });
 
-  const paint = (mode: StatusBarMode, search?: SearchBarState): void => {
+  const paint = (
+    mode: StatusBarMode,
+    hints: readonly KeyHint[],
+    search?: SearchBarState,
+  ): void => {
     clearChildren(pane);
     if (mode === "searching" && search !== undefined) {
       pane.add(searchCell(renderer, search.query, search.matchCount));
       return;
     }
-    for (const [index, hint] of GLOBAL_KEYS.entries()) {
+    for (const [index, hint] of hints.entries()) {
       pane.add(browseCell(renderer, hint, index === 0, mode === "sending"));
     }
   };
@@ -64,8 +71,10 @@ function browseCell(
 ): BoxRenderable {
   // borderColor only on the bordered cells: OpenTUI 0.5.9 paints a full
   // border around a border:false box the moment a border color is set.
+  // flexBasis 0: every cell gets the same width whatever its label length.
   const cell = new BoxRenderable(renderer, {
     flexGrow: 1,
+    flexBasis: 0,
     alignItems: "center",
     justifyContent: "center",
     ...(first ? {} : { border: ["left"] as const, borderColor: THEME.color.border }),

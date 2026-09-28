@@ -58,11 +58,22 @@ export async function setupApp(
   return app;
 }
 
-/** Enter on the first request (collections starts focused, cursor on row 0). */
+/**
+ * Open the first request WITHOUT sending it (collections starts focused,
+ * cursor on row 0). Enter in the tree opens and sends in one step; tests
+ * that only need a loaded draft use the pane's open-only path instead.
+ */
 export async function openFirstRequest(app: AppSetup): Promise<void> {
+  await app.shell.collections.openHighlighted();
+  await app.renderOnce();
+}
+
+/** Enter on the highlighted request (opens and sends), with the send settled. */
+export async function enterFromCollections(app: AppSetup): Promise<void> {
   app.mockInput.pressEnter();
   await app.flush();
   await app.shell.collections.settled();
+  await app.shell.composer.settled();
   await app.renderOnce();
 }
 

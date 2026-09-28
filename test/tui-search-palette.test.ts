@@ -114,7 +114,7 @@ describe("search palette", () => {
     expect(setup.shell.searching).toBe(false);
     expect(rowContaining(setup, "▶")).toContain("users");
     const text = frameText(setup, HEIGHT);
-    expect(text).toContain("j/k navigate"); // status bar back to browsing
+    expect(text).toContain("↑↓ select"); // status bar back to browsing
     expect(text).toContain("https://api.dev/users"); // composer loaded the URL
   });
 
@@ -132,7 +132,7 @@ describe("search palette", () => {
     expect(setup.shell.searching).toBe(false);
     expect(setup.shell.composer.loadedName).toBeNull(); // nothing opened
     const text = frameText(setup, HEIGHT);
-    expect(text).toContain("j/k navigate"); // browsing mode restored
+    expect(text).toContain("↑↓ select"); // browsing mode restored
     expect(text).toContain("Health"); // the grouped tree is back
     expect(text).toContain("no request loaded");
   });

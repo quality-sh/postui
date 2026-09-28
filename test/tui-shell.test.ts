@@ -33,15 +33,53 @@ describe("postui tui shell", () => {
     expect(text).toContain("DEV");
   });
 
-  test("renders the status bar with the mockup key map", async () => {
+  test("renders the status bar with the focused collections pane's key hints", async () => {
     const setup = await setupShell();
     await setup.renderOnce();
     const text = frameText(setup, HEIGHT);
-    expect(text).toContain("j/k navigate");
+    expect(text).toContain("↑↓ select");
     expect(text).toContain("tab focus");
     expect(text).toContain("⏎ send");
     expect(text).toContain("/ search");
     expect(text).toContain("q quit");
+    expect(text).not.toContain("j/k"); // aliases stay silent
+  });
+
+  test("the status bar follows focus: each pane shows its own hints", async () => {
+    const setup = await setupShell();
+    await setup.renderOnce();
+    const bar = (): string => frameText(setup, HEIGHT).split("\n").at(-2) ?? "";
+    expect(bar()).toContain("↑↓ select");
+    setup.mockInput.pressTab();
+    await setup.flush();
+    await setup.renderOnce();
+    expect(bar()).toContain("type to edit");
+    expect(bar()).toContain("←→ tabs");
+    expect(bar()).toContain("^s save");
+    expect(bar()).toContain("esc leave field");
+    expect(bar()).not.toContain("q quit"); // q may be text in a field
+    setup.mockInput.pressTab();
+    await setup.flush();
+    await setup.renderOnce();
+    expect(bar()).toContain("↑↓ scroll");
+    expect(bar()).toContain("+/- resend ±body");
+    setup.mockInput.pressTab();
+    await setup.flush();
+    await setup.renderOnce();
+    expect(bar()).toContain("↑↓ select");
+  });
+
+  test("the status bar follows a mouse click-to-focus too", async () => {
+    const setup = await setupShell();
+    await setup.renderOnce();
+    const responseRow = frameText(setup, HEIGHT)
+      .split("\n")
+      .findIndex(line => line.includes("no response yet"));
+    await setup.mockMouse.click(60, responseRow);
+    await setup.flush();
+    await setup.renderOnce();
+    expect(setup.shell.focus.focused).toBe(RESPONSE_PANE_ID);
+    expect(frameText(setup, HEIGHT)).toContain("↑↓ scroll");
   });
 
   test("renders the collections pane's honest empty state for a missing requests folder", async () => {
@@ -110,6 +148,64 @@ describe("postui tui shell", () => {
     await flush();
     expect(quit).toBe(true);
     expect(() => shell.dispose()).not.toThrow();
+  });
+
+  test("q does not quit while a text field has focus; ctrl+c still does", async () => {
+    let editing = true;
+    const setup = await createTestRenderer({ width: WIDTH, height: HEIGHT });
+    const shell = startShell(setup.renderer, {
+      workspaceName: "api-workspace",
+      envBadge: "DEV",
+      requestsDir: "/nonexistent/postui-shell-test/requests",
+      isEditingText: () => editing,
+    });
+    await shell.collections.ready;
+    let quit = false;
+    void shell.onQuit.then(() => {
+      quit = true;
+      return quit;
+    });
+    setup.mockInput.pressKey("q");
+    await setup.flush();
+    expect(quit).toBe(false);
+    setup.mockInput.pressKey("/");
+    await setup.flush();
+    expect(shell.searching).toBe(false); // "/" typed, never opened search
+    editing = false;
+    setup.mockInput.pressKey("q");
+    await setup.flush();
+    expect(quit).toBe(true);
+    shell.dispose();
+    setup.renderer.destroy();
+  });
+
+  test("the default text-focus check asks the composer, only while it holds focus", async () => {
+    const { shell, mockInput, flush } = await setupShell();
+    let quit = false;
+    void shell.onQuit.then(() => {
+      quit = true;
+      return quit;
+    });
+    // A composer that reports a focused text field (the method is optional).
+    Object.assign(shell.composer, { isEditingText: () => true });
+    mockInput.pressKey("q"); // collections focused: q quits as usual…
+    await flush();
+    expect(quit).toBe(true);
+    const second = await setupShell();
+    let quitSecond = false;
+    void second.shell.onQuit.then(() => {
+      quitSecond = true;
+      return quitSecond;
+    });
+    Object.assign(second.shell.composer, { isEditingText: () => true });
+    second.mockInput.pressTab(); // …but with the composer focused and editing,
+    await second.flush();
+    second.mockInput.pressKey("q"); // q is text
+    await second.flush();
+    expect(quitSecond).toBe(false);
+    second.mockInput.pressKey("c", { ctrl: true });
+    await second.flush();
+    expect(quitSecond).toBe(true);
   });
 
   test("shift+tab cycles backward", async () => {

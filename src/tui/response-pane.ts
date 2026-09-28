@@ -1,4 +1,4 @@
-import { BoxRenderable } from "@opentui/core";
+import { BoxRenderable, ScrollBoxRenderable } from "@opentui/core";
 import type { CliRenderer } from "@opentui/core";
 import { readdir } from "node:fs/promises";
 import { DEFAULT_BODY_WINDOW } from "../send/response.ts";
@@ -23,6 +23,18 @@ type ResponseTab = "body" | "headers" | "tests";
 
 const TABS: readonly ResponseTab[] = ["body", "headers", "tests"];
 
+/**
+ * Rows renderResponsePane() puts first and that stay put while the content
+ * under them scrolls: the status line and the BODY/HEADERS/TESTS strip.
+ */
+const FIXED_ROWS = 2;
+
+/** Scroll keys: ↑/↓, with j/k as silent aliases. */
+const SCROLL_KEYS: Readonly<Record<string, 1 | -1>> = { down: 1, j: 1, up: -1, k: -1 };
+
+/** Tab keys: ←/→, with h/l as silent aliases. */
+const TAB_KEYS: Readonly<Record<string, 1 | -1>> = { right: 1, l: 1, left: -1, h: -1 };
+
 type ResponseView =
   | { readonly kind: "idle" }
   | { readonly kind: "sending" }
@@ -41,7 +53,8 @@ export interface ResponsePaneOptions {
   /** The workspace's generated-tests folder (root/tests), for the TESTS tab. */
   readonly testsDir: string;
   /**
-   * Called after +/- changes the body window; the composer re-sends through
+   * Called after +/- changes the body window (the excerpt's byte cap, 256 B
+   * by default — the only way to see past it); the composer re-sends through
    * the pipeline. Returns false when the re-send could not start (in
    * flight) — the window then stays where it is, so the pane's note about
    * its window always matches the excerpt it shows.
@@ -52,6 +65,8 @@ export interface ResponsePaneOptions {
 export interface ResponsePane {
   readonly pane: BoxRenderable;
   readonly bodyWindow: number;
+  /** Rows the content is scrolled by (0 at the top, or when nothing scrolls). */
+  readonly scrollTop: number;
   /** Handle a keypress while the pane is focused; true = consumed. */
   handleKey(key: ParsedKeyLike): boolean;
   showSending(): void;
@@ -75,7 +90,9 @@ interface TestsListing {
 /**
  * The response pane: status line (status code, latency, size), BODY/HEADERS/
  * TESTS tabs, bounded body with progressive disclosure, and the diagnostic
- * region where named typed errors surface. Every rendered byte of a send is
+ * region where named typed errors surface. Keys: ↑/↓ scroll a result's
+ * content under the fixed status line and tabs, ←/→ switch tabs (j/k/h/l
+ * as silent aliases), +/- re-send with a wider/narrower body window. Every rendered byte of a send is
  * scrubbed against the send's resolved env values — the same final pass the
  * CLI's digest does, with no way to turn it off.
  */
@@ -106,7 +123,13 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
     return done;
   };
 
+  /** The scrollable content region of the last render; null when nothing scrolls. */
+  let scrollArea: ScrollBoxRenderable | null = null;
+
   const render = (): void => {
+    // A scroll box listens on the renderer; destroy it, not just detach it.
+    scrollArea?.destroyRecursively();
+    scrollArea = null;
     clearChildren(pane);
     const renderState: ResponseRenderState = {
       tab: state.tab,
@@ -117,6 +140,9 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
       tests: state.tests,
     };
     renderResponsePane(renderer, pane, renderState);
+    // Only a result can outgrow the pane; the idle/sending/error states are
+    // short and center themselves, which a scroll region would undo.
+    if (state.view.kind === "result") scrollArea = scrollContent(renderer, pane);
   };
 
   /** Fresh tests listing for the current request; re-renders when done. */
@@ -169,12 +195,15 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
     if (key.name === "-") {
       return resizeWindow(Math.max(DEFAULT_BODY_WINDOW, Math.floor(state.bodyWindow / 2)));
     }
-    if (key.name === "h" || key.name === "left") {
-      stepTab(-1);
+    const scroll = SCROLL_KEYS[key.name];
+    if (scroll !== undefined) {
+      if (scrollArea === null) return false; // nothing to scroll
+      scrollArea.scrollBy(scroll);
       return true;
     }
-    if (key.name === "l" || key.name === "right") {
-      stepTab(1);
+    const tab = TAB_KEYS[key.name];
+    if (tab !== undefined) {
+      stepTab(tab);
       return true;
     }
     return false;
@@ -186,6 +215,9 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
     pane,
     get bodyWindow(): number {
       return state.bodyWindow;
+    },
+    get scrollTop(): number {
+      return scrollArea?.scrollTop ?? 0;
     },
     handleKey,
     showSending(): void {
@@ -217,4 +249,33 @@ export function startResponsePane(renderer: CliRenderer, options: ResponsePaneOp
     },
     settled: () => tail,
   };
+}
+
+/**
+ * Move everything under the fixed rows into a scroll box that fills the
+ * rest of the pane, so ↑/↓ (and the mouse wheel) scroll the content while
+ * the status line and tabs stay in view. A fresh render starts at the top.
+ */
+function scrollContent(renderer: CliRenderer, pane: BoxRenderable): ScrollBoxRenderable {
+  // flexBasis 0: the area fills what the pane has left instead of sizing the
+  // pane to its content (a long body would otherwise squeeze the composer).
+  const area = new ScrollBoxRenderable(renderer, {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minHeight: 0,
+    width: "100%",
+    scrollY: true,
+    scrollX: false,
+    backgroundColor: THEME.color.bg,
+    verticalScrollbarOptions: {
+      trackOptions: { foregroundColor: THEME.color.dim, backgroundColor: THEME.color.bg },
+    },
+  });
+  for (const child of pane.getChildren().slice(FIXED_ROWS)) {
+    pane.remove(child);
+    area.add(child);
+  }
+  pane.add(area);
+  return area;
 }

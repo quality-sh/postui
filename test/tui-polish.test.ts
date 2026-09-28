@@ -82,9 +82,9 @@ describe("visual polish", () => {
     expect(frameText(app, HEIGHT)).toContain("SavedModuleError");
   });
 
-  test("the status bar shows the key map while browsing", async () => {
+  test("the status bar shows the collections key hints while browsing", async () => {
     const app = await setupApp({ "one.ts": mod("GET", "https://api.dev/one") });
-    const bar = rowContaining(app, "j/k navigate");
+    const bar = rowContaining(app, "↑↓ select");
     expect(bar).toContain("tab focus");
     expect(bar).toContain("⏎ send");
     expect(bar).toContain("/ search");
@@ -111,7 +111,7 @@ describe("visual polish", () => {
     expect(cell?.fg.equals(accent)).toBe(true);
     await app.shell.composer.settled();
     await app.renderOnce();
-    expect(rowContaining(app, "j/k navigate")).not.toBeNull(); // …and hands it back
+    expect(rowContaining(app, "⏎ send")).not.toBeNull(); // …and hands it back
     server.close();
   });
 });

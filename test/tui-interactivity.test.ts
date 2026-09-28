@@ -12,8 +12,6 @@ import { THEME } from "../src/tui/theme.ts";
 import { frameText, rowContaining } from "./helpers/tui-capture.ts";
 import {
   moduleSource,
-  openFirstRequest,
-  serve,
   setupApp,
   teardownApps,
   type AppSetup,
@@ -94,43 +92,6 @@ describe("mouse interactivity", () => {
     await app.renderOnce();
     expect(app.shell.focus.focused).toBe("collections");
     expect(rowOf(app, "beta-check") ?? "").toContain("▶");
-  });
-});
-
-describe("enter sends the open request", () => {
-  test("first enter opens, second enter sends through the pipeline", async () => {
-    const server = serve(() => Response.json({ ok: true }));
-    const app = await setupApp({
-      "alpha-check.ts": moduleSource("GET", server.url()),
-    });
-    await openFirstRequest(app);
-    // The composer now holds the request; enter again (collections still
-    // focused) must SEND it, not reload it.
-    app.mockInput.pressEnter();
-    await app.flush();
-    await app.shell.composer.settled();
-    await app.renderOnce();
-    expect(rowContaining(app, "200 OK")).not.toBeNull();
-    expect(rowContaining(app, '{"ok":true}')).not.toBeNull();
-    server.close();
-  });
-
-  test("enter on a not-yet-open request still opens (never sends blind)", async () => {
-    const app = await setupApp({
-      "alpha-check.ts": moduleSource("GET", "http://never-reached.test/"),
-      "beta-check.ts": moduleSource("GET", "http://also-never.test/"),
-    });
-    await openFirstRequest(app); // alpha open; cursor on alpha
-    app.mockInput.pressKeys(["J"]);
-    await app.flush();
-    await app.renderOnce();
-    app.mockInput.pressEnter(); // beta: opens, cannot reach a server
-    await app.flush();
-    await app.shell.collections.settled();
-    await app.renderOnce();
-    // The composer re-titled to beta and no response appeared.
-    expect(app.shell.composer.loadedName).toBe("beta-check");
-    expect(rowContaining(app, "no response yet")).not.toBeNull();
   });
 });
 
