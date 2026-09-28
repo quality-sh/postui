@@ -162,7 +162,7 @@ describe("response header", () => {
   test("status, latency and size share the RESPONSE row, like the mockup", async () => {
     const { app, close } = await sendBody("{}", { status: 201 });
     const row = rowContaining(app, "RESPONSE");
-    expect(row).toMatch(/RESPONSE─+ 201 CREATED │ \d+ ms │ 2 B ─╮/);
+    expect(row).toMatch(/RESPONSE─+ 201 CREATED │ \d+ ms │ 2 B │ #1 · \d\d:\d\d:\d\d ─╮/);
     close();
   });
 
