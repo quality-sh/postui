@@ -253,6 +253,7 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     focus.focus(id);
     repaintFocus();
     collections.syncFocus(focus.focused);
+    composer.syncFocus(focus.focused);
   };
 
   /**
