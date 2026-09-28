@@ -126,3 +126,10 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Conventions
+
+- **TUI: every input must visibly land.** Each keypress or click that starts
+  work or changes data shows a sign on screen for at least 300 ms, even when
+  the result matches the last one. Provenance: `req_tui_physical_feedback`,
+  `rule_tui_input_acknowledged`. Design: `design/feel-spec.md`.

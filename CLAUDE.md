@@ -75,4 +75,7 @@ _Add a brief overview of your project architecture_
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- **TUI: every input must visibly land.** Each keypress or click that starts
+  work or changes data shows a sign on screen for at least 300 ms, even when
+  the result matches the last one. Provenance: `req_tui_physical_feedback`,
+  `rule_tui_input_acknowledged`. Design: `design/feel-spec.md`.
