@@ -369,9 +369,11 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
   renderer.keyInput.on("paste", pasteListener);
   repaintStatusBar();
 
-  // Mounted last so the stack draws above every pane and the import overlay;
-  // it hangs from the header's bottom edge, over the panes' top-right corner.
-  const toasts = mountToasts(renderer, root, { top: HEADER_ROWS + 1 });
+  // Mounted last so the stack draws above every pane and the import overlay.
+  // It hangs top-right just under the composer's SEND row, over the tab
+  // content's empty right side: clear of SEND, and of the response pane's
+  // bottom note line.
+  const toasts = mountToasts(renderer, root, { top: HEADER_ROWS + 3 });
   bindToaster(toasts);
 
   return {
