@@ -1,3 +1,5 @@
+import type { JsonTokenKind } from "./json-highlight.ts";
+
 /**
  * POSTUI TUI palette — the single source of color truth for the TUI.
  *
@@ -30,5 +32,27 @@ export const THEME = {
     bright: "#e6e2f0",
     /** De-emphasized decoration: hints, the halftone dots. */
     dim: "#5c5770",
+    /** Muted green: safe (read-only) method badges — the mockup's GET. */
+    safe: "#7dbb8e",
+    /** Soft cyan: JSON numbers, booleans, and null — distinct from strings and keys. */
+    literal: "#6fb3c8",
+    /** JSON punctuation: a step dimmer than body text, a step brighter than `dim`. */
+    punct: "#7a7590",
   },
 } as const;
+
+/**
+ * JSON token kinds to color roles (json-highlight.ts spans carry kinds,
+ * never colors). Per the mockup's response body: string values gold, keys
+ * in the body text color, punctuation dimmer, and literals in their own
+ * color so a number never reads as a string.
+ */
+export const JSON_COLORS: Record<JsonTokenKind, string> = {
+  punctuation: THEME.color.punct,
+  key: THEME.color.text,
+  string: THEME.color.gold,
+  number: THEME.color.literal,
+  boolean: THEME.color.literal,
+  null: THEME.color.literal,
+  plain: THEME.color.text,
+};

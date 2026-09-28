@@ -111,7 +111,7 @@ describe("enter sends the open request", () => {
     await app.shell.composer.settled();
     await app.renderOnce();
     expect(rowContaining(app, "200 OK")).not.toBeNull();
-    expect(rowContaining(app, '{"ok":true}')).not.toBeNull();
+    expect(rowContaining(app, '"ok": true')).not.toBeNull();
     server.close();
   });
 
