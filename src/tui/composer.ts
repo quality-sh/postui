@@ -1,44 +1,30 @@
 import { BoxRenderable } from "@opentui/core";
-import type { CliRenderer } from "@opentui/core";
-import { writeFileAtomic } from "../fs/atomic.ts";
+import type { CliRenderer, MouseEvent, Renderable } from "@opentui/core";
 import type { LoadedRequest } from "../gen/load.ts";
-import type { SendResult } from "../send/send.ts";
+import { acknowledgeKey, snapshotOf, sweepFocusIn } from "./composer-ack.ts";
+import type { RevealTarget } from "./composer-ack.ts";
 import { editorKey, isEditingText, loadDraft, newEditorState } from "./composer-editor.ts";
 import type { ComposerField, EditorEffect } from "./composer-editor.ts";
+import { createComposerFx } from "./composer-fx.ts";
+import { detachLive } from "./composer-mount.ts";
+import type { DevelopPart } from "./composer-mount.ts";
 import { renderComposerPane } from "./composer-render.ts";
-import type { ComposerMessage } from "./composer-render.ts";
-import { DraftSaveRefusedError, draftModule } from "./composer-save.ts";
-import { draftCredentialValues, draftOf, sendDraft } from "./composer-send.ts";
-import type { RequestDraft } from "./composer-send.ts";
+import { draftKey, isDirty, runSave, runSend } from "./composer-run.ts";
+import type { ComposerState, RunContext, SendDiagnostics } from "./composer-run.ts";
+import { draftOf, sendDraft } from "./composer-send.ts";
 import type { ComposerKey } from "./composer-text.ts";
-import { clearChildren, errorLine } from "./render.ts";
+import { fxClock } from "./fx/clock.ts";
+import { clearChildren } from "./render.ts";
 import { THEME } from "./theme.ts";
 
 /** The pane id used in the shell's focus registry (tab order). */
 export const COMPOSER_PANE_ID = "composer";
 
-/**
- * What the composer tells the response pane (the diagnostic region). The
- * shell wires these to the response pane; the composer never renders
- * response content itself.
- */
-interface SendDiagnostics {
-  showSending(): void;
-  /**
-   * `forName` tags the result with the request that produced it (the pane
-   * labels a result that outlives its request). `extraSecrets` carries
-   * values that must be scrubbed from the rendered output in addition to
-   * the pipeline's resolved env values (literal credential values from the
-   * draft).
-   */
-  showResult(result: SendResult, latencyMs: number, extraSecrets?: string[], forName?: string): void;
-  showError(error: unknown): void;
-  showNote(text: string): void;
-}
-
 export interface ComposerPaneOptions {
   /** Where send feedback and named errors surface (the response pane). */
   readonly diagnostics: SendDiagnostics;
+  /** The send pipeline bridge; tests pass a stub. */
+  readonly sendDraft?: typeof sendDraft;
 }
 
 export interface ComposerPane {
@@ -81,16 +67,14 @@ export interface ComposerPane {
   settled(): Promise<void>;
 }
 
-/** Canonical form of a draft for the dirty check. */
-const draftKey = (draft: RequestDraft | null): string => JSON.stringify(draft);
-
 /**
  * The composer: METHOD, URL, PARAMS/HEADERS/BODY/AUTH and the body editor
  * over an IN-MEMORY draft of a saved request. Keys edit the draft directly
  * (composer-editor.ts); SEND executes it through the real pipeline
  * (sendDraft → sendRequest), never a TUI-local reimplementation; ctrl+s
  * writes it back to its own module in the `postui save` shape
- * (composer-save.ts), refusing literal credentials.
+ * (composer-save.ts), refusing literal credentials. Every key that changes
+ * something also shows that it landed (composer-ack.ts, composer-run.ts).
  */
 export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOptions): ComposerPane {
   const pane = new BoxRenderable(renderer, {
@@ -105,15 +89,19 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
   });
 
   const editor = newEditorState();
-  const state = {
-    request: null as LoadedRequest | null,
-    /** draftKey of what the module on disk holds. */
+  const fx = createComposerFx();
+  const state: ComposerState = {
+    request: null,
     baseline: "",
     inFlight: false,
     focused: false,
-    message: null as ComposerMessage | null,
+    message: null,
     scroll: { bodyTop: 0 },
+    hover: null,
+    live: { spinner: null, develop: null },
   };
+  /** Which renderable stands for which hover target, rebuilt every render. */
+  let hoverables = new Map<Renderable, string>();
 
   let tail: Promise<void> = Promise.resolve();
   const enqueue = (step: () => Promise<void>): Promise<void> => {
@@ -122,90 +110,83 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     return done;
   };
 
-  const dirty = (): boolean => state.request !== null && draftKey(editor.draft) !== state.baseline;
-
   const render = (): void => {
+    detachLive(state.live);
+    fx.unbindAll();
+    hoverables = new Map();
     clearChildren(pane);
     renderComposerPane(renderer, pane, {
       request: state.request,
       editor,
-      dirty: dirty(),
+      dirty: isDirty(ctx),
       inFlight: state.inFlight,
       focused: state.focused,
       message: state.message,
       scroll: state.scroll,
+      fx,
+      hovered: target => state.hover === target,
+      hoverable: (box, target) => hoverables.set(box, target),
+      live: state.live,
+      onSendClick: () => void send(),
     });
   };
 
-  const send = (bodyWindow?: number): boolean => {
-    const draft = editor.draft;
-    const request = state.request;
-    if (draft === null || request === null) return false;
-    if (state.inFlight) {
-      // Never queue a second (possibly mutating) request behind the first.
-      options.diagnostics.showNote("a send is already in flight — wait for it to finish");
-      return false;
-    }
-    state.inFlight = true;
-    options.diagnostics.showSending();
-    render();
-    // The pipeline gets a snapshot: typing during the send edits the next one.
-    const sent = structuredClone(draft);
-    void enqueue(async () => {
-      try {
-        const { result, latencyMs } = await sendDraft(sent, request.name, bodyWindow);
-        options.diagnostics.showResult(result, latencyMs, draftCredentialValues(sent), request.name);
-      } catch (error) {
-        // Named typed errors land on the diagnostic region — never a stack
-        // trace, never a crash. MissingEnvError arrives before any network
-        // I/O; every pipeline error message is pre-scrubbed.
-        options.diagnostics.showError(error);
-      } finally {
-        state.inFlight = false;
+  const ctx: RunContext = {
+    state,
+    editor,
+    fx,
+    diagnostics: options.diagnostics,
+    sendDraft: options.sendDraft ?? sendDraft,
+    render,
+    enqueue,
+  };
+  const send = (bodyWindow?: number): boolean => runSend(ctx, bodyWindow);
+
+  /** Drop a running reveal: the next frame shows the real lines at once. */
+  const dropReveal = (): void => {
+    state.live.develop?.instance?.destroyRecursively();
+    state.live.develop = null;
+  };
+
+  /** Start a develop reveal for the next rebuild (never on an instant clock: nothing would run it). */
+  const startReveal = (target: RevealTarget): void => {
+    dropReveal();
+    if (target === null || fxClock().instant) return;
+    const part: DevelopPart = {
+      target,
+      instance: null,
+      onDone: () => {
+        if (state.live.develop !== part) return;
+        state.live.develop = null;
         render();
-      }
-    });
-    return true;
+      },
+    };
+    state.live.develop = part;
   };
 
-  /**
-   * Ctrl+S. The module text and the credential checks run synchronously, so
-   * a refusal shows at once and the baseline moves with the keypress; the
-   * atomic write follows on the queue. A failed write restores the old
-   * baseline (the ● comes back).
-   */
-  const save = (): void => {
-    const draft = editor.draft;
-    const request = state.request;
-    if (draft === null || request === null) return;
-    let module: ReturnType<typeof draftModule>;
-    try {
-      module = draftModule(draft);
-    } catch (error) {
-      if (!(error instanceof DraftSaveRefusedError)) throw error;
-      state.message = { text: error.message, tone: "error" };
-      return;
-    }
-    draft.url = module.url; // what the module now stores (URL normalization)
-    editor.urlCursor = Math.min(editor.urlCursor, draft.url.length);
-    const previous = state.baseline;
-    const saved = draftKey(draft);
-    state.baseline = saved;
-    void enqueue(async () => {
-      try {
-        await writeFileAtomic(request.path, module.source);
-        state.message = { text: `saved ${request.name}.ts`, tone: "ok" };
-      } catch (error) {
-        if (state.baseline === saved) state.baseline = previous;
-        state.message = { text: errorLine(error), tone: "error" };
-      }
-      render();
-    });
+  /** Hover moved between targets (null = off every pill and row). */
+  const setHover = (target: string | null): void => {
+    if (target === state.hover) return;
+    const previous = state.hover;
+    state.hover = target;
+    if (previous !== null) fx.refresh(previous);
+    if (target !== null) fx.refresh(target);
   };
+  const hoverTargetOf = (event: MouseEvent): string | null => {
+    for (let node: Renderable | null = event.target; node !== null && node !== pane; node = node.parent) {
+      const target = hoverables.get(node);
+      if (target !== undefined) return target;
+    }
+    return null;
+  };
+  // Over/out bubble up from whatever the pointer is on: one pair of handlers
+  // covers every pill and row, however often the pane is rebuilt.
+  pane.onMouseOver = (event: MouseEvent): void => setHover(hoverTargetOf(event));
+  pane.onMouseOut = (): void => setHover(null);
 
   const applyEffect = (effect: EditorEffect): void => {
     if (effect === "send") send();
-    else if (effect === "save") save();
+    else if (effect === "save") runSave(ctx);
     else if (effect === "form-body") {
       state.message = { text: "form bodies are edited in the saved module", tone: "note" };
     }
@@ -213,21 +194,26 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
 
   const paste = (text: string): boolean => {
     if (!isEditingText(editor)) return false;
+    const before = snapshotOf(editor);
     const multiline = editor.field === "content" && editor.tab === "body";
     for (const ch of text.replace(/\r\n?/g, "\n")) {
       if (ch === "\n" && !multiline) continue;
       editorKey(editor, ch === "\n" ? { name: "return", ctrl: false } : { name: ch, ctrl: false, sequence: ch });
     }
     state.message = null;
+    startReveal(acknowledgeKey(fx, before, editor, { name: "paste", ctrl: false }));
     render();
     return true;
   };
 
   const handleKey = (key: ComposerKey): boolean => {
     if (key.ctrl && key.name === "c") return false; // ctrl+c stays a shell-level quit
+    const before = snapshotOf(editor);
     const effect = editorKey(editor, key);
     if (effect === null) return false;
     if (effect !== "save") state.message = null; // a message lasts until the next key
+    // A key is its own repaint: any reveal still running gives way to it.
+    startReveal(acknowledgeKey(fx, before, editor, key));
     applyEffect(effect);
     render();
     return true;
@@ -242,6 +228,7 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
     if (!sameRequest) {
       state.message = null;
       state.scroll.bodyTop = 0;
+      dropReveal();
     }
     render();
   };
@@ -254,7 +241,7 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
       return state.request?.name ?? null;
     },
     get edited(): boolean {
-      return dirty();
+      return isDirty(ctx);
     },
     get field(): ComposerField {
       return editor.field;
@@ -266,6 +253,7 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
       editor.draft = null;
       state.baseline = "";
       state.message = null;
+      dropReveal();
       render();
     },
     send,
@@ -275,6 +263,7 @@ export function startComposerPane(renderer: CliRenderer, options: ComposerPaneOp
       const focused = focusedPaneId === COMPOSER_PANE_ID;
       if (focused === state.focused) return;
       state.focused = focused;
+      if (focused && editor.draft !== null) sweepFocusIn(fx, editor);
       render();
     },
     settled: () => tail,

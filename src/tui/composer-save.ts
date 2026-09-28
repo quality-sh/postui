@@ -17,9 +17,15 @@ import type { RequestDraft } from "./composer-send.ts";
  * refused whole — nothing is stripped behind the user's back.
  */
 
-/** The draft cannot be saved as it stands; the message says what to fix. */
+/**
+ * The draft cannot be saved as it stands; the message says what to fix and
+ * `field` where (the URL, or the named credential header), so the composer
+ * can point at it.
+ */
 export class DraftSaveRefusedError extends Data.TaggedError("DraftSaveRefusedError")<{
   readonly message: string;
+  readonly field: "url" | "header";
+  readonly header?: string;
 }> {}
 
 interface DraftModule {
@@ -34,6 +40,8 @@ export function draftModule(draft: RequestDraft): DraftModule {
     if (isCredentialHeader(name) && value !== "" && !hasEnvRef(value)) {
       throw new DraftSaveRefusedError({
         message: `not saved: ${name} holds a literal credential — use an env reference like $API_TOKEN`,
+        field: "header",
+        header: name,
       });
     }
   }
@@ -41,11 +49,12 @@ export function draftModule(draft: RequestDraft): DraftModule {
   try {
     url = new URL(draft.url);
   } catch {
-    throw new DraftSaveRefusedError({ message: "not saved: the URL does not parse" });
+    throw new DraftSaveRefusedError({ message: "not saved: the URL does not parse", field: "url" });
   }
   if ((url.username !== "" || url.password !== "") && !hasEnvRef(`${url.username}:${url.password}`)) {
     throw new DraftSaveRefusedError({
       message: "not saved: the URL carries a literal user:password — use env references",
+      field: "url",
     });
   }
   if (extractEnvRefs(url.href).join() !== extractEnvRefs(draft.url).join()) {
@@ -53,6 +62,7 @@ export function draftModule(draft: RequestDraft): DraftModule {
     // reference so it no longer resolves: refuse instead of corrupting it.
     throw new DraftSaveRefusedError({
       message: "not saved: an env reference in the URL would not survive — keep references in the path or query as $NAME",
+      field: "url",
     });
   }
   return { source: renderModule(specOf(draft, url)), url: url.href };

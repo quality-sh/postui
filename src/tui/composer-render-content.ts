@@ -1,17 +1,24 @@
-import { StyledText, TextRenderable, bg, fg } from "@opentui/core";
-import type { BoxRenderable, CliRenderer, TextChunk } from "@opentui/core";
 import { extractEnvRefs } from "../save/credentials.ts";
 import { REDACTED, isCredentialHeader } from "../send/redact.ts";
+import { bodySpans } from "./composer-body.ts";
 import { tableSource } from "./composer-editor.ts";
 import type { EditorState } from "./composer-editor.ts";
 import type { RequestDraft } from "./composer-send.ts";
+import { sliceSpans, span, withCursor } from "./composer-spans.ts";
+import type { ContentLine, Span } from "./composer-spans.ts";
 import type { Row, TableCursor } from "./composer-table.ts";
 import { lineOf, windowAround } from "./composer-text.ts";
 import { THEME } from "./theme.ts";
 
 /**
- * The composer's tab content: the line-numbered body editor and the
- * PARAMS/HEADERS/AUTH row tables.
+ * The composer's tab content as lines of spans: the line-numbered body
+ * editor and the PARAMS/HEADERS/AUTH row tables. composer-render.ts turns
+ * them into renderables (or develops them in).
+ *
+ * The body editor matches the response code block: line numbers on an
+ * `element` gutter, the text on the pane's panel, no rule between, JSON
+ * coloured by token kind (composer-body.ts) — while the text itself stays
+ * exactly as typed, so the cursor lands where the keys put it.
  *
  * REDACTION: a credential header's value (the pipeline's own
  * isCredentialHeader) is never drawn as text. At rest it renders as the
@@ -38,48 +45,31 @@ const ADD_LABELS: Record<string, string> = {
   auth: "+ add credential header",
 };
 
-/** Text with a block cursor at `cursor` (a space when the cursor is past the end). */
-export function cursorChunks(text: string, cursor: number, color: string): TextChunk[] {
-  const at = text.codePointAt(cursor);
-  const glyph = at === undefined ? " " : String.fromCodePoint(at);
-  return [
-    fg(color)(text.slice(0, cursor)),
-    bg(THEME.color.accent)(fg(THEME.color.bg)(glyph)),
-    fg(color)(text.slice(cursor + glyph.length)),
-  ];
-}
+const plain = (text: string, color: string): ContentLine => ({ spans: [span(text, color)] });
 
-export function renderContent(renderer: CliRenderer, box: BoxRenderable, view: ContentView): void {
+export function contentLines(view: ContentView): ContentLine[] {
   const draft = view.editor.draft as RequestDraft;
-  if (view.editor.tab === "body") {
-    bodyView(renderer, box, draft, view);
-    return;
-  }
-  tableView(renderer, box, view);
+  if (view.editor.tab === "body") return bodyView(draft, view);
+  const lines = tableView(view);
   if (view.editor.tab === "auth") {
-    box.add(line(renderer, [fg(THEME.color.muted)("  values must be env references, e.g. Bearer $API_TOKEN")]));
+    lines.push(plain("  values must be env references, e.g. Bearer $API_TOKEN", THEME.color.muted));
   }
+  return lines;
 }
 
-function line(renderer: CliRenderer, chunks: TextChunk[]): TextRenderable {
-  return new TextRenderable(renderer, { content: new StyledText(chunks), width: "100%", wrapMode: "none" });
-}
-
-function bodyView(renderer: CliRenderer, box: BoxRenderable, draft: RequestDraft, view: ContentView): void {
+function bodyView(draft: RequestDraft, view: ContentView): ContentLine[] {
   if (Array.isArray(draft.body)) {
-    for (const entry of draft.body) {
-      const value = entry.file === undefined ? (entry.value ?? "") : `@${entry.file}`;
-      box.add(line(renderer, [fg(THEME.color.text)(`  ${entry.name} = ${value}`)]));
-    }
-    box.add(line(renderer, [fg(THEME.color.muted)("  form bodies are edited in the saved module")]));
-    return;
+    return [
+      ...draft.body.map(entry => {
+        const value = entry.file === undefined ? (entry.value ?? "") : `@${entry.file}`;
+        return plain(`  ${entry.name} = ${value}`, THEME.color.text);
+      }),
+      plain("  form bodies are edited in the saved module", THEME.color.muted),
+    ];
   }
   const text = draft.body ?? "";
-  if (text === "" && !view.active) {
-    box.add(line(renderer, [fg(THEME.color.dim)("  (no body)")]));
-    return;
-  }
-  const lines = text.split("\n");
+  if (text === "" && !view.active) return [plain("  (no body)", THEME.color.dim)];
+  const lines = bodySpans(text);
   const cursor = view.editor.bodyCursor;
   const cursorLine = lineOf(text, cursor);
   const top = scrollTop(view, cursorLine, lines.length);
@@ -88,16 +78,21 @@ function bodyView(renderer: CliRenderer, box: BoxRenderable, draft: RequestDraft
   const lineStartAt = text.lastIndexOf("\n", cursor - 1) + 1;
   const textWidth = view.width - gutterWidth - 3;
   const column = cursor - lineStartAt;
-  const offset = column - windowAround(lines[cursorLine] ?? "", column, textWidth).cursor;
+  const rawLine = text.split("\n")[cursorLine] ?? "";
+  const offset = column - windowAround(rawLine, column, textWidth).cursor;
   const shown = lines.slice(top, top + Math.min(view.visibleLines, lines.length));
-  shown.forEach((content, index) => {
+  return shown.map((spans, index) => {
     const number = top + index;
-    const gutter = fg(THEME.color.dim)(`${String(number + 1).padStart(gutterWidth, " ")} │ `);
-    const visible = content.slice(offset);
-    const body = view.active && number === cursorLine
-      ? cursorChunks(visible, column - offset, THEME.color.text)
-      : [fg(THEME.color.text)(visible === "" ? " " : visible)];
-    box.add(line(renderer, [gutter, ...body]));
+    const visible = sliceSpans(spans, offset);
+    const body = view.active && number === cursorLine ? withCursor(visible, column - offset) : visible;
+    return {
+      spans: [
+        // The gutter: the number on the element tone, then one panel cell.
+        { text: ` ${String(number + 1).padStart(gutterWidth, " ")} `, fg: THEME.color.dim, bg: THEME.color.element },
+        span(" ", THEME.color.text),
+        ...body,
+      ],
+    };
   });
 }
 
@@ -113,54 +108,51 @@ function scrollTop(view: ContentView, cursorLine: number, lineCount: number): nu
   return top;
 }
 
-function tableView(renderer: CliRenderer, box: BoxRenderable, view: ContentView): void {
+function tableView(view: ContentView): ContentLine[] {
   const source = tableSource(view.editor);
-  if (source === null) return;
+  if (source === null) return [];
   const tab = view.editor.tab;
   const separator = tab === "params" ? " = " : ": ";
   const cursor = view.active ? view.editor.table : null;
-  source.rows.forEach((row, index) => {
+  const lines: ContentLine[] = source.rows.map((row, index) => {
     const at = cursor !== null && cursor.row === index ? cursor : null;
-    box.add(tableRow(renderer, row, at, separator, tab !== "params"));
+    return { spans: tableRow(row, at, separator, tab !== "params"), row: index };
   });
-  if (cursor !== null && cursor.row >= source.rows.length) {
-    box.add(tableRow(renderer, source.template, cursor, separator, tab !== "params"));
+  const addRow = source.rows.length;
+  if (cursor !== null && cursor.row >= addRow) {
+    lines.push({ spans: tableRow(source.template, cursor, separator, tab !== "params"), row: addRow });
   } else {
-    box.add(line(renderer, [fg(THEME.color.dim)(`  ${ADD_LABELS[tab] ?? "+ add"}`)]));
+    lines.push({ spans: [span(`  ${ADD_LABELS[tab] ?? "+ add"}`, THEME.color.dim)], row: addRow });
   }
+  return lines;
+}
+
+/** Cell text as spans, with the cursor when it sits in this cell. */
+function cell(text: string, pos: number | null): Span[] {
+  const spans = [span(text, THEME.color.text)];
+  return pos === null ? spans : withCursor(spans, pos);
 }
 
 /** One name/value row; `cursor` is set only on the row the cursor is in. */
-function tableRow(
-  renderer: CliRenderer,
-  row: Row,
-  cursor: TableCursor | null,
-  separator: string,
-  isHeader: boolean,
-): TextRenderable {
+function tableRow(row: Row, cursor: TableCursor | null, separator: string, isHeader: boolean): Span[] {
   const [name, value] = row;
-  const marker = cursor === null ? fg(THEME.color.text)("  ") : fg(THEME.color.accent)("▸ ");
-  const nameChunks = cursor?.col === 0
-    ? cursorChunks(name, cursor.pos, THEME.color.text)
-    : [fg(THEME.color.text)(name)];
+  const marker = cursor === null ? span("  ", THEME.color.text) : span("▸ ", THEME.color.accent);
+  const nameSpans = cell(name, cursor?.col === 0 ? cursor.pos : null);
   const credential = isHeader && isCredentialHeader(name);
-  let valueChunks: TextChunk[];
-  if (cursor?.col === 1) {
-    valueChunks = cursorChunks(credential ? maskCredential(value) : value, cursor.pos, THEME.color.text);
-  } else {
-    valueChunks = credential ? redactedValue(value) : [fg(THEME.color.text)(value)];
-  }
-  return line(renderer, [marker, ...nameChunks, fg(THEME.color.dim)(separator), ...valueChunks]);
+  let valueSpans: Span[];
+  if (cursor?.col === 1) valueSpans = cell(credential ? maskCredential(value) : value, cursor.pos);
+  else valueSpans = credential ? redactedValue(value) : [span(value, THEME.color.text)];
+  return [marker, ...nameSpans, span(separator, THEME.color.dim), ...valueSpans];
 }
 
 /** A credential value at rest: the fixed marker, the env names it uses, or a warning. */
-function redactedValue(value: string): TextChunk[] {
-  if (value === "") return [fg(THEME.color.dim)("(empty)")];
+function redactedValue(value: string): Span[] {
+  if (value === "") return [span("(empty)", THEME.color.dim)];
   const refs = extractEnvRefs(value);
   if (refs.length > 0) {
-    return [fg(THEME.color.text)(REDACTED), fg(THEME.color.muted)(` ← ${refs.map(ref => `$${ref}`).join(" ")}`)];
+    return [span(REDACTED, THEME.color.text), span(` ← ${refs.map(ref => `$${ref}`).join(" ")}`, THEME.color.muted)];
   }
-  return [fg(THEME.color.text)(REDACTED), fg(THEME.color.gold)(" literal — will not save")];
+  return [span(REDACTED, THEME.color.text), span(" literal — will not save", THEME.color.gold)];
 }
 
 /**

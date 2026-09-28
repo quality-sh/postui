@@ -224,8 +224,9 @@ describe("composer pane", () => {
     await openFirstRequest(app);
     const text = frameText(app, HEIGHT);
     expect(text).not.toContain("─BODY─"); // the old titled inner box
-    // the gutter sits one cell in from the pane border: no nested border between
-    expect(rowContaining(app, "1 │ hello")).toMatch(/│ 1 │ hello/);
+    // the gutter sits one cell in from the pane border: no nested border
+    // between, and no rule between the gutter and the text
+    expect(rowContaining(app, " 1  hello")).toMatch(/│ {2}1 {2}hello/);
     expect(text).not.toContain("u edit url");
   });
 });

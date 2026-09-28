@@ -116,8 +116,8 @@ describe("composer editing", () => {
     await app.mockInput.typeText("q"); // q types in the body
     await app.flush();
     const text = frameText(app, HEIGHT);
-    expect(text).toContain('1 │ {"a":1,"b":2');
-    expect(text).toContain("2 │ q}"); // line numbers kept
+    expect(text).toContain(' 1  {"a":1,"b":2');
+    expect(text).toContain(" 2  q}"); // line numbers kept
     expect(received).toBe(""); // nothing sent yet
     await pressEscape(app);
     app.mockInput.pressEnter(); // from the tab strip, enter sends
@@ -153,11 +153,11 @@ describe("composer editing", () => {
     await openFirstRequest(app);
     await focusComposer(app);
     await arrows(app, "down", "down");
-    expect(frameText(app, HEIGHT)).toContain(" 1 │ line1");
+    expect(frameText(app, HEIGHT)).toContain("  1  line1");
     await arrows(app, ...Array.from({ length: 30 }, () => "down" as const));
     const text = frameText(app, HEIGHT);
-    expect(text).toContain("31 │ line31");
-    expect(text).not.toMatch(/ 1 │ line1 /); // scrolled off the top
+    expect(text).toContain(" 31  line31");
+    expect(text).not.toMatch(/ {2}1 {2}line1 /); // scrolled off the top
   });
 
   test("typing into an empty body starts one; emptying it again means no body", async () => {
@@ -169,7 +169,7 @@ describe("composer editing", () => {
     await arrows(app, "down", "down");
     await app.mockInput.typeText("hi");
     await app.flush();
-    expect(frameText(app, HEIGHT)).toContain("1 │ hi");
+    expect(frameText(app, HEIGHT)).toContain(" 1  hi");
     expect(app.shell.composer.edited).toBe(true);
     app.mockInput.pressBackspace();
     app.mockInput.pressBackspace();
@@ -255,7 +255,7 @@ describe("composer editing", () => {
     await app.mockInput.pasteBracketedText('{\r  "name": "Ada"\r}');
     await settle(app);
     const frame = frameText(app, HEIGHT);
-    expect(frame).toContain('2 │   "name": "Ada"');
-    expect(frame).toContain("3 │ }");
+    expect(frame).toContain(' 2    "name": "Ada"');
+    expect(frame).toContain(" 3  }");
   });
 });
