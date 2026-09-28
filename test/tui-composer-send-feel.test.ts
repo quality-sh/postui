@@ -3,7 +3,7 @@ import { RGBA } from "@opentui/core";
 import { createTestRenderer, type TestRendererSetup } from "@opentui/core/testing";
 import type { SendResult } from "../src/send/send.ts";
 import { startComposerPane } from "../src/tui/composer.ts";
-import { MIN_BUSY_MS } from "../src/tui/composer-run.ts";
+import { MIN_BUSY_MS } from "../src/tui/send-lifecycle.ts";
 import { manualClock, setFxClock, type ManualClock } from "../src/tui/fx/clock.ts";
 import { spinnerFrame } from "../src/tui/fx/spinner.ts";
 import { THEME } from "../src/tui/theme.ts";
@@ -37,9 +37,6 @@ afterEach(() => {
 afterAll(async () => {
   await teardownApps();
 });
-
-/** Let queued promise continuations run (no timers involved). */
-const microtasks = (): Promise<void> => Bun.sleep(0);
 
 describe("SEND feedback", () => {
   test("enter presses the pill at once and a halftone spinner takes its label", async () => {
@@ -128,22 +125,18 @@ describe("minimum busy display", () => {
     return { setup, composer, seen };
   }
 
-  test("an instant response is held until MIN_BUSY_MS: pill and pane stay busy together", async () => {
+  test("an instant response reaches the pane at once; the pill stays busy until MIN_BUSY_MS", async () => {
     const clock = watchMotion();
     const { setup, composer, seen } = await instantComposer();
     expect(composer.send()).toBe(true);
-    await microtasks();
+    await composer.settled();
     expect(seen.sending).toBe(1);
-    expect(seen.results).toBe(0); // the pipeline answered; the result waits
+    expect(seen.results).toBe(1); // handed over; the response pane holds its own busy view
     clock.advance(MIN_BUSY_MS - 1);
-    await microtasks();
     await setup.renderOnce();
-    expect(seen.results).toBe(0);
     expect(setup.captureCharFrame()).not.toContain("SEND"); // still the spinner
     clock.advance(1);
-    await composer.settled();
     await setup.renderOnce();
-    expect(seen.results).toBe(1);
     expect(setup.captureCharFrame()).toContain("SEND");
   });
 

@@ -5,7 +5,7 @@ import { COLLECTIONS_PANE_ID, startCollectionsPane } from "./collections.ts";
 import type { CollectionsPane } from "./collections.ts";
 import { COMPOSER_PANE_ID, startComposerPane } from "./composer.ts";
 import type { ComposerPane } from "./composer.ts";
-import { watchSends } from "./composer-send.ts";
+import { sendDraft } from "./composer-send.ts";
 import { RESPONSE_PANE_ID, startResponsePane } from "./response-pane.ts";
 import type { ResponsePane } from "./response-pane.ts";
 import { FocusRegistry } from "./focus.ts";
@@ -129,8 +129,13 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     statusBar,
     onBusyChange: () => repaintStatusBar(),
   });
-  const unwatchSends = watchSends(target => sends.described(target));
   const composer = startComposerPane(renderer, {
+    // Before the pipeline's first await, this shell's busy view learns what
+    // it is waiting on (GET /users) — scoped to this shell, not a global.
+    sendDraft: (draft, name, bodyWindow) => {
+      sends.described({ method: draft.method, url: draft.url });
+      return sendDraft(draft, name, bodyWindow);
+    },
     diagnostics: {
       showSending: () => sends.started(),
       showResult: (result, latencyMs, extraSecrets, forName) => sends.result(result, latencyMs, extraSecrets, forName),
@@ -382,8 +387,8 @@ export function startShell(renderer: CliRenderer, options: ShellOptions): Shell 
     dispose: () => {
       renderer.keyInput.off("keypress", keyListener);
       renderer.keyInput.off("paste", pasteListener);
+      sends.dispose();
       bindToaster(null);
-      unwatchSends();
       toasts.destroy();
     },
   };

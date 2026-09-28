@@ -32,6 +32,8 @@ export interface SendLifecycle {
   error(error: unknown): void;
   /** True from started() until the settled view is on screen. */
   readonly busy: boolean;
+  /** Cancel a held result; later calls do nothing (the shell is gone). */
+  dispose(): void;
 }
 
 export interface SendLifecycleOptions {
@@ -73,6 +75,7 @@ export function startSendLifecycle(options: SendLifecycleOptions): SendLifecycle
   let busy = false;
   /** The settled view waiting out the minimum busy time. */
   let held: { run: () => void; cancel: Cancel } | null = null;
+  let disposed = false;
 
   const setBusy = (next: boolean): void => {
     if (busy === next) return;
@@ -84,6 +87,7 @@ export function startSendLifecycle(options: SendLifecycleOptions): SendLifecycle
 
   /** Run `show` once the busy view has had its minimum time. */
   const settle = (show: () => void): void => {
+    if (disposed) return; // a send that outlived its shell paints nothing
     const run = (): void => {
       held = null;
       show();
@@ -102,7 +106,13 @@ export function startSendLifecycle(options: SendLifecycleOptions): SendLifecycle
     get busy(): boolean {
       return busy;
     },
+    dispose(): void {
+      disposed = true;
+      held?.cancel();
+      held = null;
+    },
     started(): void {
+      if (disposed) return;
       // A result still held from the last send lands first, so it is never lost.
       if (held !== null) {
         held.cancel();
@@ -116,7 +126,7 @@ export function startSendLifecycle(options: SendLifecycleOptions): SendLifecycle
       setBusy(true);
     },
     described(next: SendTarget): void {
-      if (!busy || held !== null) return;
+      if (disposed || !busy || held !== null) return;
       options.response.describeSending(next);
       options.statusBar.setStatus(sendingStatus(next));
     },

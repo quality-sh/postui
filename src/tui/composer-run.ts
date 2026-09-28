@@ -3,7 +3,8 @@ import type { LoadedRequest } from "../gen/load.ts";
 import type { SendResult } from "../send/send.ts";
 import { tableSource } from "./composer-editor.ts";
 import type { EditorState } from "./composer-editor.ts";
-import { holdUntil, type ComposerFx } from "./composer-fx.ts";
+import type { ComposerFx } from "./composer-fx.ts";
+import { MIN_BUSY_MS } from "./send-lifecycle.ts";
 import type { LiveParts } from "./composer-mount.ts";
 import type { ComposerMessage } from "./composer-render.ts";
 import { DraftSaveRefusedError, draftModule } from "./composer-save.ts";
@@ -21,10 +22,10 @@ import { THEME } from "./theme.ts";
  *
  * SEND: the pill swells brighter under the key and shows a spinner for the
  * whole send; the busy state lasts at least MIN_BUSY_MS on the fx clock.
- * A response that lands sooner is HELD — the result reaches the response
- * pane (diagnostics.showResult / showError) only once MIN_BUSY_MS has
- * passed since the key, so pill and pane leave the busy state together
- * and a fast send never looks like nothing happened. A second send while
+ * The result goes to the response pane as soon as it lands; that pane
+ * holds its busy view to the same MIN_BUSY_MS, and the pill releases on
+ * the same schedule, so pill and pane leave the busy state together and a
+ * fast send never looks like nothing happened. A second send while
  * one is in flight is refused with a note and a love pulse on the pill.
  *
  * Save: a toast either way (`saved <name>.ts`, the refusal's reason, or
@@ -32,8 +33,6 @@ import { THEME } from "./theme.ts";
  * and a love pulse on the field a refusal names.
  */
 
-/** Minimum busy display for a send, from the key (design/feel-spec.md §3.2). */
-export const MIN_BUSY_MS = 220;
 /** The ● fades out over this long once a save clears it. */
 const DOT_FADE_MS = 420;
 const SEND_PRESSED = blendHex(THEME.color.accent, THEME.color.text, 0.45);
@@ -108,25 +107,27 @@ export function runSend(ctx: RunContext, bodyWindow?: number): boolean {
   // The pipeline gets a snapshot: typing during the send edits the next one.
   const sent = structuredClone(draft);
   void ctx.enqueue(async () => {
-    let deliver: () => void;
     try {
       const { result, latencyMs } = await ctx.sendDraft(sent, request.name, bodyWindow);
-      deliver = () => ctx.diagnostics.showResult(result, latencyMs, draftCredentialValues(sent), request.name);
+      ctx.diagnostics.showResult(result, latencyMs, draftCredentialValues(sent), request.name);
     } catch (error) {
       // Named typed errors land on the diagnostic region — never a stack
       // trace, never a crash. MissingEnvError arrives before any network
       // I/O; every pipeline error message is pre-scrubbed.
-      deliver = () => ctx.diagnostics.showError(error);
+      ctx.diagnostics.showError(error);
     }
-    await holdUntil(clock, startedAt + MIN_BUSY_MS);
-    try {
-      deliver();
-    } finally {
+    // The response pane holds its own busy view to MIN_BUSY_MS from the
+    // send start; the pill releases on the same schedule, off the queue so
+    // the send itself counts as settled once the result is handed over.
+    const release = (): void => {
       ctx.state.inFlight = false;
       ctx.state.live.spinner?.destroyRecursively();
       ctx.state.live.spinner = null;
       ctx.render();
-    }
+    };
+    const remaining = startedAt + MIN_BUSY_MS - clock.now();
+    if (clock.instant || remaining <= 0) release();
+    else clock.after(remaining, release);
   });
   return true;
 }

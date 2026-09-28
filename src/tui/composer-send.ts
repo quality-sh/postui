@@ -61,21 +61,6 @@ export interface SendTarget {
   readonly url: string;
 }
 
-const watchers = new Set<(target: SendTarget) => void>();
-
-/**
- * Hear every send as it starts: the shell watches so the busy view can
- * name the request (`GET /users`) at once, without the composer threading
- * the draft through its callbacks. Returns the unwatch. With no watcher
- * (unit tests of a lone composer) sends go unheard.
- */
-export function watchSends(listener: (target: SendTarget) => void): () => void {
-  watchers.add(listener);
-  return () => {
-    watchers.delete(listener);
-  };
-}
-
 export interface DraftSendResult {
   result: SendResult;
   /** Wall-clock milliseconds around the pipeline call (send + capture). */
@@ -94,8 +79,6 @@ export async function sendDraft(
   name: string,
   bodyWindow?: number,
 ): Promise<DraftSendResult> {
-  // Before any await: the busy view is labelled before its first paint.
-  for (const watch of watchers) watch({ method: draft.method, url: draft.url });
   const snapshot = await mkdtemp(join(tmpdir(), "postui-tui-send-"));
   try {
     await writeFile(join(snapshot, `${name}.ts`), draftModuleSource(draft));

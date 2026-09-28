@@ -141,15 +141,3 @@ export function createComposerFx(): ComposerFx {
     unbindAll: () => slots.clear(),
   };
 }
-
-/**
- * Resolve once `until` (a time on `clock`) has passed. An instant clock
- * never waits: its effects have no duration to hold for.
- */
-export function holdUntil(clock: FxClock, until: number): Promise<void> {
-  const remaining = until - clock.now();
-  if (clock.instant || remaining <= 0) return Promise.resolve();
-  return new Promise(resolve => {
-    clock.after(remaining, resolve);
-  });
-}
